@@ -53,7 +53,7 @@ fn main() {
 ```
 
 ### Response
-The response is contains page info, cursors and edges (cursors for all of the items in the response).
+The response FindResult<T> contains page info, cursors and edges (cursors for all of the items in the response).
 ```rust
 pub struct PageInfo {
     pub has_next_page: bool,
