@@ -1,3 +1,10 @@
+//! Based on the [node module](https://github.com/mixmaxhq/mongo-cursor-pagination) but for Rust.
+//! You can read more about it on their [blog post](https://engineering.mixmax.com/blog/api-paging-built-the-right-way/) and why it seems necessary. 
+//!
+//! So far it only supports count and find. Search and aggregation will come when needed. 
+//! 
+//! The usage is a bit different than the node version. See the examples for more details.
+
 mod error;
 mod options;
 
@@ -9,6 +16,7 @@ use options::CursorOptions;
 use serde::Deserialize;
 use std::io::Cursor;
 
+/// Provides details about if there are more pages and the cursor to the start of the list and end
 #[derive(Debug)]
 pub struct PageInfo {
     pub has_next_page: bool,
@@ -17,11 +25,13 @@ pub struct PageInfo {
     pub next_cursor: Option<String>,
 }
 
+/// Edges are the cursors on all of the items in the return
 #[derive(Clone, Debug)]
 pub struct Edge {
     pub cursor: String,
 }
 
+/// The result of a find method with the items, edges, pagination info, and total count of objects
 #[derive(Debug)]
 pub struct FindResult<T> {
     pub page_info: PageInfo,
@@ -30,12 +40,14 @@ pub struct FindResult<T> {
     pub items: Vec<T>,
 }
 
+/// The direction of the list, ie. you are sending a cursor for the next or previous items. Defaults to Next
 #[derive(Clone, Debug, PartialEq)]
 pub enum CursorDirections {
     Previous,
     Next,
 }
 
+/// The main entry point for finding documents
 #[derive(Debug)]
 pub struct PaginatedCursor {
     has_cursor: bool,
@@ -45,6 +57,13 @@ pub struct PaginatedCursor {
 }
 
 impl<'a> PaginatedCursor {
+    /// Updates or creates all of the find options to help with pagination and returns a PaginatedCursor object.
+    /// 
+    /// # Arguments
+    /// * `options` - Optional find options that you would like to perform any searches with
+    /// * `cursor` - An optional existing cursor in base64. This would have come from a previous FindResult<T>
+    /// * `direction` - Determines whether the cursor supplied is for a previous page or the next page. Defaults to Next
+    /// 
     pub fn new(
         options: Option<FindOptions>,
         cursor: Option<String>,
@@ -67,6 +86,18 @@ impl<'a> PaginatedCursor {
         }
     }
 
+    /// Estimates the number of documents in the collection using collection metadata.
+    pub fn estimated_document_count(&self, collection: &Collection) -> Result<i64, CursorError> {
+        let count_options = self.options.clone();
+        let total_count: i64 = collection
+            .estimated_document_count(count_options)
+            .unwrap();
+        Ok(total_count)
+    }
+
+    /// Gets the number of documents matching filter.
+    /// Note that using [`PaginatedCursor::estimated_document_count`](#method.estimated_document_count)
+    /// is recommended instead of this method is most cases.
     pub fn count_documents(
         &self,
         collection: &Collection,
@@ -290,6 +321,7 @@ fn map_from_base64(base64_string: String) -> Result<Document, CursorError> {
     Ok(cursor_doc)
 }
 
+/// Converts an id into a MongoDb ObjectId
 pub fn get_object_id(id: &str) -> Result<ObjectId, CursorError> {
     let object_id = match ObjectId::with_string(id) {
         Ok(object_id) => object_id,

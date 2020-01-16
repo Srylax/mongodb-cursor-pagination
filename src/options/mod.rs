@@ -1,5 +1,5 @@
 use bson::Document;
-use mongodb::options::{CountOptions, FindOptions};
+use mongodb::options::{CountOptions, EstimatedDocumentCountOptions, FindOptions};
 
 const DEFAULT_LIMIT: i64 = 25;
 
@@ -107,6 +107,17 @@ impl From<CursorOptions> for Option<CountOptions> {
             .limit(options.limit)
             .max_time(options.max_time)
             .skip(options.skip)
+            .build();
+        Some(count_options)
+    }
+}
+
+impl From<CursorOptions> for Option<EstimatedDocumentCountOptions> {
+    fn from(options: CursorOptions) -> Option<EstimatedDocumentCountOptions> {
+        let count_options = EstimatedDocumentCountOptions::builder()
+            .max_time(options.max_time)
+            .selection_criteria(options.selection_criteria)
+            .read_concern(options.read_concern)
             .build();
         Some(count_options)
     }
