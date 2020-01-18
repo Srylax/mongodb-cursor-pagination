@@ -1,12 +1,19 @@
 # MongoDB Cursor Pagination
 
-Based on the [node module](https://github.com/mixmaxhq/mongo-cursor-pagination) but for Rust.
-You can read more about it on their [blog post](https://engineering.mixmax.com/blog/api-paging-built-the-right-way/) and why it seems necessary. 
+This package provides a cursor based pagination using the mongodb driver. Essentially instead of
+page based pagination you receive cursors to both the start and end of the result set so that you can
+ensure you get the next item, even if the data changes in between requests. That said, it also provides 
+regular ole' page based pagination as well. If your options include skip and limit parameters then 
+you'll do the page based. If you leave skip off or send a cursor, then it will use that instead (and ignore
+the skip parameter.)
+
+It's based on the [node.js module](https://github.com/mixmaxhq/mongo-cursor-pagination) but written in Rust.
+You can read more about the concept on their [blog post](https://engineering.mixmax.com/blog/api-paging-built-the-right-way/). 
 
 So far it only supports count and find. Search and aggregation will come when needed. 
 
 ### Usage:
-Anyway, the usage is a bit different than the node version. See the examples for more details.
+The usage is a bit different than the node version. See the examples for more details and a working example.
 ```rust
 use mongodb::{options::FindOptions, Client};
 use mongodb_cursor_pagination::{CursorDirections, FindResult, PaginatedCursor};
@@ -72,4 +79,38 @@ pub struct FindResult<T> {
     pub total_count: i64,
     pub items: Vec<T>,
 }
+```
+
+## Features
+It has support for graphql (using [juniper](https://github.com/graphql-rust/juniper)) if you enable the `graphql` flag. You can use it by just including the PageInfo into your code.
+
+```rust
+use mongodb_cursor_pagination::{PageInfo, Edge};
+
+#[derive(Serialize, Deserialize)]
+struct MyDataConnection {
+    page_info: PageInfo,
+    edges: Vec<Edge>,
+    data: Vec<MyData>,
+    total_count: i64,
+}
+
+[juniper::object]
+impl MyDataConnection {
+    fn page_info(&self) -> &PageInfo {
+        self.page_info
+    }
+
+    fn edges(&self) -> &Vec<Edge> {
+        &self.edges
+    }
+    ...
+}
+```
+
+Inside your cargo.toml dependencies
+
+```
+[dependencies]
+mongodb_cursor_pagination = { version = "0.2.0", features = ["graphql"] }
 ```

@@ -8,16 +8,16 @@
 mod error;
 mod options;
 
-use bson::{bson, doc, oid::ObjectId, Document};
+use bson::{bson, Bson, doc, oid::ObjectId, Document};
 use error::CursorError;
 use log::warn;
 use mongodb::{options::FindOptions, Collection};
 use options::CursorOptions;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
 /// Provides details about if there are more pages and the cursor to the start of the list and end
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct PageInfo {
     pub has_next_page: bool,
     pub has_previous_page: bool,
@@ -25,10 +25,47 @@ pub struct PageInfo {
     pub next_cursor: Option<String>,
 }
 
+#[cfg(feature = "graphql")]
+#[juniper::object]
+impl PageInfo {
+    fn has_next_page(&self) -> bool {
+        self.has_next_page
+    }
+
+    fn has_previous_page(&self) -> bool {
+        self.has_previous_page
+    }
+
+    fn start_cursor(&self) -> Option<String> {
+        self.start_cursor.to_owned()
+    }
+
+    fn next_cursor(&self) -> Option<String> {
+        self.next_cursor.to_owned()
+    }
+}
+
 /// Edges are the cursors on all of the items in the return
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Edge {
     pub cursor: String,
+}
+
+#[cfg(feature = "graphql")]
+#[juniper::object]
+impl Edge {
+    fn cursor(&self) -> String {
+        self.cursor.to_owned()
+    }
+}
+// FIX: there's probably a better way to do this...but for now
+#[cfg(feature = "graphql")]
+impl From<&Edge> for Edge {
+    fn from(edge: &Edge) -> Edge {
+        Edge {
+            cursor: edge.cursor.clone(),
+        }
+    }
 }
 
 /// The result of a find method with the items, edges, pagination info, and total count of objects
@@ -150,7 +187,7 @@ impl<'a> PaginatedCursor {
                 has_skip = true;
             }
             let cursor = collection.find(query_doc, options).unwrap();
-
+            
             for result in cursor {
                 match result {
                     Ok(doc) => {
@@ -263,23 +300,28 @@ impl<'a> PaginatedCursor {
             return Ok(query_doc);
         } else if let Some(sort) = &self.options.sort {
             if sort.len() > 1 {
-                let mut search_a = query_doc.clone();
-                let mut search_b = query_doc.clone();
-                for key in sort.keys() {
-                    if key != "_id" && self.cursor_doc.contains_key(key) {
-                        let value = self.cursor_doc.get(key).unwrap();
-                        let direction = self.get_direction_from_key(&sort, key);
-                        search_a.insert(key, doc! { direction: value.clone() });
-                        search_b.insert(key, value.clone());
+                let keys: Vec<&String> = sort.keys().collect();
+                let mut queries: Vec<Document> = Vec::new();
+                for i in 0..keys.len() {
+                    let mut query = query_doc.clone();
+                    for j in 0..i {
+                        let value = self.cursor_doc.get(keys[j]).unwrap();
+                        query.insert(keys[j], value.clone());
                     }
+                    // insert the directional sort (ie. < or >)
+                    let value = self.cursor_doc.get(keys[i]).unwrap();
+                    let direction = self.get_direction_from_key(&sort, keys[i]);
+                    query.insert(keys[i], doc! { direction: value.clone() });
+                    queries.push(query);
                 }
-                let object_id = self.cursor_doc.get("_id").unwrap().clone();
-                let direction = self.get_direction_from_key(&sort, "_id");
-                search_b.insert("_id", doc! { direction: object_id });
-                if !search_a.is_empty() {
-                    query_doc = doc! { "$or": [search_a, search_b] };
+                if queries.len() > 1 {
+                    query_doc = doc! { "$or": [] };
+                    let or_array = query_doc.get_array_mut("$or").unwrap();
+                    for d in queries.iter() {
+                        or_array.push(Bson::Document(d.clone()));
+                    }
                 } else {
-                    query_doc = search_b;
+                    query_doc = queries[0].clone();
                 }
             } else {
                 // this is the simplest form, it's just a sort by _id
