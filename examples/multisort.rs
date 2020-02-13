@@ -114,8 +114,8 @@ fn print_details(name: &str, find_results: &FindResult<MyFruit>) {
         name,
         find_results.items,
         find_results.total_count,
-        find_results.page_info.start_cursor,
         find_results.page_info.next_cursor,
+        find_results.page_info.start_cursor,
         find_results.page_info.has_previous_page,
         find_results.page_info.has_next_page,
     );

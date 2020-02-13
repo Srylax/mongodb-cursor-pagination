@@ -1,14 +1,14 @@
 //! Based on the [node module](https://github.com/mixmaxhq/mongo-cursor-pagination) but for Rust.
-//! You can read more about it on their [blog post](https://engineering.mixmax.com/blog/api-paging-built-the-right-way/) and why it seems necessary. 
+//! You can read more about it on their [blog post](https://engineering.mixmax.com/blog/api-paging-built-the-right-way/) and why it seems necessary.
 //!
-//! So far it only supports count and find. Search and aggregation will come when needed. 
-//! 
+//! So far it only supports count and find. Search and aggregation will come when needed.
+//!
 //! The usage is a bit different than the node version. See the examples for more details.
 
 mod error;
 mod options;
 
-use bson::{bson, Bson, doc, oid::ObjectId, Document};
+use bson::{bson, doc, oid::ObjectId, Bson, Document};
 use error::CursorError;
 use log::warn;
 use mongodb::{options::FindOptions, Collection};
@@ -95,12 +95,12 @@ pub struct PaginatedCursor {
 
 impl<'a> PaginatedCursor {
     /// Updates or creates all of the find options to help with pagination and returns a PaginatedCursor object.
-    /// 
+    ///
     /// # Arguments
     /// * `options` - Optional find options that you would like to perform any searches with
     /// * `cursor` - An optional existing cursor in base64. This would have come from a previous FindResult<T>
     /// * `direction` - Determines whether the cursor supplied is for a previous page or the next page. Defaults to Next
-    /// 
+    ///
     pub fn new(
         options: Option<FindOptions>,
         cursor: Option<String>,
@@ -126,9 +126,7 @@ impl<'a> PaginatedCursor {
     /// Estimates the number of documents in the collection using collection metadata.
     pub fn estimated_document_count(&self, collection: &Collection) -> Result<i64, CursorError> {
         let count_options = self.options.clone();
-        let total_count: i64 = collection
-            .estimated_document_count(count_options)
-            .unwrap();
+        let total_count: i64 = collection.estimated_document_count(count_options).unwrap();
         Ok(total_count)
     }
 
@@ -186,13 +184,33 @@ impl<'a> PaginatedCursor {
             } else {
                 has_skip = true;
             }
+            // let has_previous
+            let is_previous_query = self.has_cursor && self.direction == CursorDirections::Previous;
+            // if it's a previous query we need to reverse the sort we were doing
+            if is_previous_query {
+                if let Some(sort) = options.sort {
+                    let keys: Vec<&String> = sort.keys().collect();
+                    let mut new_sort = Document::new();
+                    for key in keys {
+                        let bson_value = sort.get(key).unwrap();
+                        match bson_value {
+                            Bson::I32(value) => {
+                                new_sort.insert(key, Bson::I32(-value));
+                            }
+                            Bson::I64(value) => {
+                                new_sort.insert(key, Bson::I64(-value));
+                            }
+                            _ => {}
+                        };
+                    }
+                    options.sort = Some(new_sort);
+                }
+            }
             let cursor = collection.find(query_doc, options).unwrap();
-            
             for result in cursor {
                 match result {
                     Ok(doc) => {
-                        let item = bson::from_bson(bson::Bson::Document(doc.clone()))
-                            .expect("Unable to parse document");
+                        let item = bson::from_bson(bson::Bson::Document(doc.clone())).unwrap();
                         edges.push(Edge {
                             cursor: self.create_from_doc(&doc),
                         });
@@ -203,9 +221,6 @@ impl<'a> PaginatedCursor {
                     }
                 }
             }
-            // let has_previous
-            let is_previous_query = self.has_cursor && self.direction == CursorDirections::Previous;
-
             let has_more: bool;
             if has_skip {
                 has_more = (items.len() as i64 + skip_value) < total_count;
@@ -219,6 +234,11 @@ impl<'a> PaginatedCursor {
                     || (is_previous_query && self.has_cursor);
             }
 
+            // reorder if we are going backwards
+            if is_previous_query {
+                items.reverse();
+                edges.reverse();
+            }
             // remove the extra item to check if we have more
             if has_more && !is_previous_query {
                 items.pop();
@@ -227,11 +247,6 @@ impl<'a> PaginatedCursor {
                 items.remove(0);
                 edges.remove(0);
             }
-
-            // // reorder if we are going backwards
-            // if is_previous_query {
-            //     items.reverse();
-            // }
 
             // create the next cursor
             if !items.is_empty() && edges.len() == items.len() {
@@ -290,20 +305,16 @@ impl<'a> PaginatedCursor {
             None => Document::new(),
         };
 
-        if query_doc.contains_key("$or") || query_doc.contains_key("$and") {
-            return Err(CursorError::Unknown(
-                "We don't handle those fancy queries yet".to_owned(),
-            ));
-        }
-
         if self.cursor_doc.is_empty() {
             return Ok(query_doc);
         } else if let Some(sort) = &self.options.sort {
             if sort.len() > 1 {
                 let keys: Vec<&String> = sort.keys().collect();
                 let mut queries: Vec<Document> = Vec::new();
+                #[allow(clippy::needless_range_loop)]
                 for i in 0..keys.len() {
                     let mut query = query_doc.clone();
+                    #[allow(clippy::needless_range_loop)]
                     for j in 0..i {
                         let value = self.cursor_doc.get(keys[j]).unwrap();
                         query.insert(keys[j], value.clone());
@@ -325,7 +336,6 @@ impl<'a> PaginatedCursor {
                 }
             } else {
                 // this is the simplest form, it's just a sort by _id
-                // TODO: handle fancier queries like $and, $or
                 let object_id = self.cursor_doc.get("_id").unwrap().clone();
                 let direction = self.get_direction_from_key(&sort, "_id");
                 query_doc.insert("_id", doc! { direction: object_id });
