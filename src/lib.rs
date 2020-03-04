@@ -269,17 +269,29 @@ impl<'a> PaginatedCursor {
         })
     }
 
+    fn get_value_from_doc(&self, key: &str, doc: Bson) -> (String, Bson) {
+        let parts: Vec<&str> = key.splitn(2, ".").collect();
+        match doc {
+            Bson::Document(d) => {
+                let value = d.get(parts[0]).unwrap();
+                match value {
+                    Bson::Document(d) => {
+                        self.get_value_from_doc(parts[1], Bson::Document(d.clone()))
+                    }
+                    _ => (parts[0].to_string(), value.clone()),
+                }
+            }
+            _ => (parts[0].to_string(), doc),
+        }
+    }
+
     fn create_from_doc(&self, doc: &Document) -> String {
         let mut only_sort_keys = Document::new();
         if let Some(sort) = &self.options.sort {
             for key in sort.keys() {
-                if doc.contains_key(key) {
-                    if let Some(value) = doc.get(key) {
-                        only_sort_keys.insert(key, value.clone());
-                    }
-                } else {
-                    warn!("Doc doesn't contain {}", key);
-                }
+                let (_, value): (String, Bson) =
+                    self.get_value_from_doc(key, Bson::Document(doc.clone()));
+                only_sort_keys.insert(key, value);
             }
             let mut buf = Vec::new();
             bson::encode_document(&mut buf, &only_sort_keys).unwrap();
