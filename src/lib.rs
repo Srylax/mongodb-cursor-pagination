@@ -5,7 +5,7 @@
 //!
 //! The usage is a bit different than the node version. See the examples for more details.
 
-mod error;
+pub mod error;
 mod options;
 
 use bson::{doc, oid::ObjectId, Bson, Document};
