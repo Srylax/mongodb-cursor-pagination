@@ -8,7 +8,7 @@
 mod error;
 mod options;
 
-use bson::{bson, doc, oid::ObjectId, Bson, Document};
+use bson::{doc, oid::ObjectId, Bson, Document};
 use error::CursorError;
 use log::warn;
 use mongodb::{options::FindOptions, Collection};
