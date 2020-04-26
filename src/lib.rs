@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
 /// Provides details about if there are more pages and the cursor to the start of the list and end
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PageInfo {
     pub has_next_page: bool,
     pub has_previous_page: bool,
