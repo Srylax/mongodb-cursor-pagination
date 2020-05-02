@@ -14,7 +14,6 @@ So far it only supports count and find. Search and aggregation will come when ne
 
 For more examples of how to use, take a look at [graphql-mongodb-boilerplate](https://github.com/briandeboer/graphql-mongodb-boilerplate) and [mongodb-base-service](https://github.com/briandeboer/mongodb-base-service).
 
-[mongodb-base-service]()
 ### Usage:
 The usage is a bit different than the node version. See the examples for more details and a working example.
 ```rust
