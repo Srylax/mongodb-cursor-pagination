@@ -269,19 +269,23 @@ impl<'a> PaginatedCursor {
         })
     }
 
-    fn get_value_from_doc(&self, key: &str, doc: Bson) -> (String, Bson) {
+    fn get_value_from_doc(&self, key: &str, doc: Bson) -> Option<(String, Bson)> {
         let parts: Vec<&str> = key.splitn(2, ".").collect();
         match doc {
             Bson::Document(d) => {
-                let value = d.get(parts[0]).unwrap();
-                match value {
-                    Bson::Document(d) => {
-                        self.get_value_from_doc(parts[1], Bson::Document(d.clone()))
-                    }
-                    _ => (parts[0].to_string(), value.clone()),
+                let some_value = d.get(parts[0]);
+                match some_value {
+                    Some(value) =>
+                        match value {
+                            Bson::Document(d) => {
+                                self.get_value_from_doc(parts[1], Bson::Document(d.clone()))
+                            }
+                            _ => Some((parts[0].to_string(), value.clone())),
+                        },
+                    None => None
                 }
             }
-            _ => (parts[0].to_string(), doc),
+            _ => Some((parts[0].to_string(), doc)),
         }
     }
 
@@ -289,9 +293,9 @@ impl<'a> PaginatedCursor {
         let mut only_sort_keys = Document::new();
         if let Some(sort) = &self.options.sort {
             for key in sort.keys() {
-                let (_, value): (String, Bson) =
-                    self.get_value_from_doc(key, Bson::Document(doc.clone()));
-                only_sort_keys.insert(key, value);
+                if let Some((_, value)) = self.get_value_from_doc(key, Bson::Document(doc.clone())) {
+                    only_sort_keys.insert(key, value);
+                }
             }
             let mut buf = Vec::new();
             bson::encode_document(&mut buf, &only_sort_keys).unwrap();
@@ -328,18 +332,18 @@ impl<'a> PaginatedCursor {
                     let mut query = query_doc.clone();
                     #[allow(clippy::needless_range_loop)]
                     for j in 0..i {
-                        let value = self.cursor_doc.get(keys[j]).unwrap();
+                        let value = self.cursor_doc.get(keys[j]).unwrap_or(&Bson::Null);
                         query.insert(keys[j], value.clone());
                     }
                     // insert the directional sort (ie. < or >)
-                    let value = self.cursor_doc.get(keys[i]).unwrap();
+                    let value = self.cursor_doc.get(keys[i]).unwrap_or(&Bson::Null);
                     let direction = self.get_direction_from_key(&sort, keys[i]);
                     query.insert(keys[i], doc! { direction: value.clone() });
                     queries.push(query);
                 }
                 if queries.len() > 1 {
                     query_doc = doc! { "$or": [] };
-                    let or_array = query_doc.get_array_mut("$or").unwrap();
+                    let or_array = query_doc.get_array_mut("$or").map_err(|_| CursorError::Unknown("Unable to process".into()))?;
                     for d in queries.iter() {
                         or_array.push(Bson::Document(d.clone()));
                     }

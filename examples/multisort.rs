@@ -104,7 +104,7 @@ fn create_options(limit: i64, skip: i64) -> FindOptions {
     FindOptions::builder()
         .limit(limit)
         .skip(skip)
-        .sort(doc! { "how_many": 1, "name": -1 })
+        .sort(doc! { "how_many": 1, "name": -1, "non_existent": 1 })
         .build()
 }
 
