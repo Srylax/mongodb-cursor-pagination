@@ -1,23 +1,19 @@
-#[macro_use]
-extern crate bson;
-#[macro_use]
-extern crate serde;
-
-extern crate mongodb;
-extern crate mongodb_cursor_pagination;
-
 use mongodb::{options::FindOptions, Client};
 use mongodb_cursor_pagination::{CursorDirections, FindResult, PaginatedCursor};
+use serde::Deserialize;
+use bson::{doc, Document};
 
-#[derive(Debug, Deserialize)]
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct MyFruit {
-    name: String,
-    how_many: i32,
+    pub name: String,
+    pub how_many: i32,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let client =
-        Client::with_uri_str("mongodb://localhost:27017/").expect("Failed to initialize client.");
+        Client::with_uri_str("mongodb://localhost:27017/").await.expect("Failed to initialize client.");
     let db = client.database("mongodb_cursor_pagination");
 
     let docs = vec![
@@ -41,12 +37,14 @@ fn main() {
 
     db.collection("myfruits")
         .insert_many(docs, None)
+        .await
         .expect("Unable to insert data");
 
     // query page 1, 2 at a time
     let mut options = create_options(3, 0);
     let mut find_results: FindResult<MyFruit> = PaginatedCursor::new(Some(options), None, None)
         .find(&db.collection("myfruits"), None)
+        .await
         .expect("Unable to find data");
     print_details("First page", &find_results);
 
@@ -55,6 +53,7 @@ fn main() {
     let mut cursor = find_results.page_info.next_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Next))
         .find(&db.collection("myfruits"), None)
+        .await
         .expect("Unable to find data");
     print_details("Second page", &find_results);
 
@@ -63,6 +62,7 @@ fn main() {
     cursor = find_results.page_info.start_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), None)
+        .await
         .expect("Unable to find data");
     print_details("Previous page", &find_results);
 
@@ -70,6 +70,7 @@ fn main() {
     options = create_options(3, 4);
     find_results = PaginatedCursor::new(Some(options), None, None)
         .find(&db.collection("myfruits"), None)
+        .await
         .expect("Unable to find data");
     print_details(
         "Skipped 4 (only three more left, so no more next page)",
@@ -81,6 +82,7 @@ fn main() {
     cursor = find_results.page_info.start_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), None)
+        .await
         .expect("Unable to find data");
     print_details("Previous from skip", &find_results);
 
@@ -89,21 +91,23 @@ fn main() {
     cursor = find_results.page_info.start_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), None)
+        .await
         .expect("Unable to find data");
     print_details(
         "Previous again - at beginning, but cursor was for before Avocado (so only Orange)",
         &find_results,
     );
 
-    db.collection("myfruits")
+    db.collection::<Document>("myfruits")
         .drop(None)
+        .await
         .expect("Unable to drop collection");
 }
 
-fn create_options(limit: i64, skip: i64) -> FindOptions {
+fn create_options(limit: i64, skip: u64) -> FindOptions {
     FindOptions::builder()
         .limit(limit)
-        .skip(skip)
+        .skip(Some(skip))
         .sort(doc! { "how_many": 1, "name": -1, "non_existent": 1 })
         .build()
 }

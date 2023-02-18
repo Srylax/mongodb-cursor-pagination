@@ -14,7 +14,10 @@ use log::warn;
 use mongodb::{options::FindOptions, Collection};
 use options::CursorOptions;
 use serde::{Deserialize, Serialize};
-use std::io::Cursor;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use serde::de::DeserializeOwned;
+use futures_util::stream::StreamExt;
 
 /// Provides details about if there are more pages and the cursor to the start of the list and end
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -73,7 +76,7 @@ impl From<&Edge> for Edge {
 pub struct FindResult<T> {
     pub page_info: PageInfo,
     pub edges: Vec<Edge>,
-    pub total_count: i64,
+    pub total_count: u64,
     pub items: Vec<T>,
 }
 
@@ -124,20 +127,20 @@ impl<'a> PaginatedCursor {
     }
 
     /// Estimates the number of documents in the collection using collection metadata.
-    pub fn estimated_document_count(&self, collection: &Collection) -> Result<i64, CursorError> {
+    pub async fn estimated_document_count<T>(&self, collection: &Collection<T>) -> Result<u64, CursorError> {
         let count_options = self.options.clone();
-        let total_count: i64 = collection.estimated_document_count(count_options).unwrap();
+        let total_count = collection.estimated_document_count(count_options).await.unwrap();
         Ok(total_count)
     }
 
     /// Gets the number of documents matching filter.
     /// Note that using [`PaginatedCursor::estimated_document_count`](#method.estimated_document_count)
     /// is recommended instead of this method is most cases.
-    pub fn count_documents(
+    pub async fn count_documents<T>(
         &self,
-        collection: &Collection,
+        collection: &Collection<T>,
         query: Option<&Document>,
-    ) -> Result<i64, CursorError> {
+    ) -> Result<u64, CursorError> {
         let mut count_options = self.options.clone();
         count_options.limit = None;
         count_options.skip = None;
@@ -146,23 +149,24 @@ impl<'a> PaginatedCursor {
         } else {
             Document::new()
         };
-        let total_count: i64 = collection
+        let total_count = collection
             .count_documents(count_query, count_options)
+            .await
             .unwrap();
         Ok(total_count)
     }
 
     /// Finds the documents in the `collection` matching `filter`.
-    pub fn find<T>(
+    pub async fn find<T>(
         &self,
-        collection: &Collection,
+        collection: &Collection<Document>,
         filter: Option<&Document>,
     ) -> Result<FindResult<T>, CursorError>
     where
-        T: Deserialize<'a>,
+        T: DeserializeOwned + Sync + Send + Unpin + Clone
     {
         // first count the docs
-        let total_count: i64 = self.count_documents(collection, filter).unwrap();
+        let total_count = self.count_documents(collection, filter).await.unwrap();
 
         // setup defaults
         let mut items: Vec<T> = vec![];
@@ -178,7 +182,7 @@ impl<'a> PaginatedCursor {
             // build the cursor
             let query_doc = self.get_query(filter)?;
             let mut options = self.options.clone();
-            let skip_value: i64 = if let Some(s) = options.skip { s } else { 0 };
+            let skip_value = options.skip.unwrap_or_else(|| 0);
             if self.has_cursor || skip_value == 0 {
                 options.skip = None;
             } else {
@@ -194,11 +198,11 @@ impl<'a> PaginatedCursor {
                     for key in keys {
                         let bson_value = sort.get(key).unwrap();
                         match bson_value {
-                            Bson::I32(value) => {
-                                new_sort.insert(key, Bson::I32(-value));
+                            Bson::Int32(value) => {
+                                new_sort.insert(key, Bson::Int32(-*value));
                             }
-                            Bson::I64(value) => {
-                                new_sort.insert(key, Bson::I64(-value));
+                            Bson::Int64(value) => {
+                                new_sort.insert(key, Bson::Int64(-*value));
                             }
                             _ => {}
                         };
@@ -206,8 +210,8 @@ impl<'a> PaginatedCursor {
                     options.sort = Some(new_sort);
                 }
             }
-            let cursor = collection.find(query_doc, options).unwrap();
-            for result in cursor {
+            let mut cursor = collection.find(query_doc, options).await.unwrap();
+            while let Some(result) = cursor.next().await {
                 match result {
                     Ok(doc) => {
                         let item = bson::from_bson(bson::Bson::Document(doc.clone())).unwrap();
@@ -223,7 +227,7 @@ impl<'a> PaginatedCursor {
             }
             let has_more: bool;
             if has_skip {
-                has_more = (items.len() as i64 + skip_value) < total_count;
+                has_more = (items.len() as u64 + skip_value) < total_count;
                 has_previous_page = true;
                 has_next_page = has_more;
             } else {
@@ -297,9 +301,8 @@ impl<'a> PaginatedCursor {
                     only_sort_keys.insert(key, value);
                 }
             }
-            let mut buf = Vec::new();
-            bson::encode_document(&mut buf, &only_sort_keys).unwrap();
-            base64::encode(&buf)
+            let buf = bson::to_vec(&only_sort_keys).unwrap();
+            STANDARD.encode(buf)
         } else {
             "".to_owned()
         }
@@ -383,15 +386,15 @@ impl<'a> PaginatedCursor {
 
 fn map_from_base64(base64_string: String) -> Result<Document, CursorError> {
     // change from base64
-    let decoded = base64::decode(&base64_string)?;
+    let decoded = STANDARD.decode(&base64_string)?;
     // decode from bson
-    let cursor_doc = bson::decode_document(&mut Cursor::new(&decoded)).unwrap();
+    let cursor_doc = bson::from_slice(decoded.as_slice()).unwrap();
     Ok(cursor_doc)
 }
 
 /// Converts an id into a MongoDb ObjectId
 pub fn get_object_id(id: &str) -> Result<ObjectId, CursorError> {
-    let object_id = match ObjectId::with_string(id) {
+    let object_id = match ObjectId::parse_str(id) {
         Ok(object_id) => object_id,
         Err(_e) => return Err(CursorError::InvalidId(id.to_string())),
     };
