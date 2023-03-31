@@ -109,10 +109,3 @@ impl MyDataConnection {
     ...
 }
 ```
-
-Inside your cargo.toml dependencies
-
-```
-[dependencies]
-mongodb_cursor_pagination = { version = "0.2.0", features = ["graphql"] }
-```
