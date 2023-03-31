@@ -1,12 +1,12 @@
 [package]
 name = "mongodb-cursor-pagination"
 version = "0.2.9"
-authors = ["Brian DeBoer <bdeboer@noreply.com>"]
-edition = "2018"
+authors = ["Kylian Lichtensteiger <e38c1a93@srylax.dev"]
+edition = "2021"
 license = "MIT"
 keywords = ["mongo", "mongodb", "database", "cursor", "pagination"]
 readme = "README.md"
-repository = "https://github.com/briandeboer/mongodb-cursor-pagination"
+repository = "https://github.com/Srylax/mongodb-cursor-pagination"
 description = """
 Provides cursor based pagination for the native MongoDB driver in Rust.
 """
