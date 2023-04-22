@@ -6,19 +6,19 @@ extern crate serde;
 extern crate mongodb;
 extern crate mongodb_cursor_pagination;
 
-use mongodb::{options::FindOptions, Client};
+use crate::helper::{create_options, print_details, MyFruit};
+use mongodb::Client;
 use mongodb_cursor_pagination::{CursorDirections, FindResult, PaginatedCursor};
 
-#[derive(Debug, Deserialize)]
-pub struct MyFruit {
-    name: String,
-    how_many: i32,
-}
+mod helper;
 
 fn main() {
     let client =
         Client::with_uri_str("mongodb://localhost:27017/").expect("Failed to initialize client.");
     let db = client.database("mongodb_cursor_pagination");
+
+    // Ensure there is no collection myfruits
+    let _ = db.collection("myfruits").drop(None);
 
     let docs = vec![
         doc! { "name": "Apple", "how_many": 5 },
@@ -48,6 +48,14 @@ fn main() {
     let mut find_results: FindResult<MyFruit> = PaginatedCursor::new(Some(options), None, None)
         .find(&db.collection("myfruits"), None)
         .expect("Unable to find data");
+    assert_eq!(
+        find_results.items,
+        vec![
+            MyFruit::new("Apple", 5),
+            MyFruit::new("Avocado", 5),
+            MyFruit::new("Bananas", 10)
+        ]
+    );
     print_details("First page", &find_results);
 
     // get the second page
@@ -56,6 +64,14 @@ fn main() {
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Next))
         .find(&db.collection("myfruits"), None)
         .expect("Unable to find data");
+    assert_eq!(
+        find_results.items,
+        vec![
+            MyFruit::new("Blackberry", 12),
+            MyFruit::new("Blueberry", 10),
+            MyFruit::new("Grapes", 12)
+        ]
+    );
     print_details("Second page", &find_results);
 
     // get previous page
@@ -64,6 +80,14 @@ fn main() {
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), None)
         .expect("Unable to find data");
+    assert_eq!(
+        find_results.items,
+        vec![
+            MyFruit::new("Apple", 5),
+            MyFruit::new("Avocado", 5),
+            MyFruit::new("Bananas", 10)
+        ]
+    );
     print_details("Previous page", &find_results);
 
     // with a skip
@@ -71,6 +95,14 @@ fn main() {
     find_results = PaginatedCursor::new(Some(options), None, None)
         .find(&db.collection("myfruits"), None)
         .expect("Unable to find data");
+    assert_eq!(
+        find_results.items,
+        vec![
+            MyFruit::new("Blueberry", 10),
+            MyFruit::new("Grapes", 12),
+            MyFruit::new("Orange", 3)
+        ]
+    );
     print_details(
         "Skipped 4 (only three more left, so no more next page)",
         &find_results,
@@ -82,6 +114,14 @@ fn main() {
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), None)
         .expect("Unable to find data");
+    assert_eq!(
+        find_results.items,
+        vec![
+            MyFruit::new("Avocado", 5),
+            MyFruit::new("Bananas", 10),
+            MyFruit::new("Blackberry", 12),
+        ]
+    );
     print_details("Previous from skip", &find_results);
 
     // backwards one more time and we are all the way back
@@ -90,34 +130,13 @@ fn main() {
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), None)
         .expect("Unable to find data");
+    assert_eq!(find_results.items, vec![MyFruit::new("Apple", 5),]);
     print_details(
-        "Previous again - at beginning, but cursor was for before Avocado (so only Orange)",
+        "Previous again - at beginning, but cursor was for before Avocado (so only Apple)",
         &find_results,
     );
 
     db.collection("myfruits")
         .drop(None)
         .expect("Unable to drop collection");
-}
-
-fn create_options(limit: i64, skip: i64) -> FindOptions {
-    FindOptions::builder()
-        .limit(limit)
-        .skip(skip)
-        .sort(doc! { "how_many": 1, "name": -1, "non_existent": 1 })
-        .build()
-}
-
-fn print_details(name: &str, find_results: &FindResult<MyFruit>) {
-    println!(
-        "{}:\nitems: {:?}\ntotal: {}\nnext: {:?}\nprevious: {:?}\nhas_previous: {}\nhas_next: {}",
-        name,
-        find_results.items,
-        find_results.total_count,
-        find_results.page_info.next_cursor,
-        find_results.page_info.start_cursor,
-        find_results.page_info.has_previous_page,
-        find_results.page_info.has_next_page,
-    );
-    println!("-----------------");
 }
