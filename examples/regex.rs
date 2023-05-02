@@ -6,20 +6,20 @@ extern crate serde;
 extern crate mongodb;
 extern crate mongodb_cursor_pagination;
 
+use crate::helper::{create_options, print_details, MyFruit};
 use bson::Bson;
-use mongodb::{options::FindOptions, Client};
+use mongodb::Client;
 use mongodb_cursor_pagination::{CursorDirections, FindResult, PaginatedCursor};
 
-#[derive(Debug, Deserialize)]
-pub struct MyFruit {
-    name: String,
-    how_many: i32,
-}
+mod helper;
 
 fn main() {
     let client =
         Client::with_uri_str("mongodb://localhost:27017/").expect("Failed to initialize client.");
     let db = client.database("mongodb_cursor_pagination");
+
+    // Ensure there is no collection myfruits
+    let _ = db.collection("myfruits").drop(None);
 
     let docs = vec![
         doc! { "name": "Apple", "how_many": 2, "spanish": "Manzana" },
@@ -56,6 +56,10 @@ fn main() {
     let mut find_results: FindResult<MyFruit> = PaginatedCursor::new(Some(options), None, None)
         .find(&db.collection("myfruits"), Some(&filter))
         .expect("Unable to find data");
+    assert_eq!(
+        find_results.items,
+        vec![MyFruit::new("Apple", 2), MyFruit::new("Bananas", 10),]
+    );
     print_details("First page", &find_results);
 
     // get the second page
@@ -64,6 +68,13 @@ fn main() {
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Next))
         .find(&db.collection("myfruits"), Some(&filter))
         .expect("Unable to find data");
+    assert_eq!(
+        find_results.items,
+        vec![
+            MyFruit::new("Blackberry", 12),
+            MyFruit::new("Blueberry", 10),
+        ]
+    );
     print_details("Second page", &find_results);
 
     // get previous page
@@ -72,6 +83,10 @@ fn main() {
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), Some(&filter))
         .expect("Unable to find data");
+    assert_eq!(
+        find_results.items,
+        vec![MyFruit::new("Apple", 2), MyFruit::new("Bananas", 10),]
+    );
     print_details("Previous (first) page", &find_results);
 
     // get the second page again
@@ -80,6 +95,13 @@ fn main() {
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Next))
         .find(&db.collection("myfruits"), Some(&filter))
         .expect("Unable to find data");
+    assert_eq!(
+        find_results.items,
+        vec![
+            MyFruit::new("Blackberry", 12),
+            MyFruit::new("Blueberry", 10),
+        ]
+    );
     print_details("Second page (again)", &find_results);
 
     // get the third page
@@ -88,6 +110,10 @@ fn main() {
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Next))
         .find(&db.collection("myfruits"), Some(&filter))
         .expect("Unable to find data");
+    assert_eq!(
+        find_results.items,
+        vec![MyFruit::new("Lingonberry", 5), MyFruit::new("Raspberry", 5),]
+    );
     print_details("Third page", &find_results);
 
     // get previous page
@@ -96,31 +122,16 @@ fn main() {
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), Some(&filter))
         .expect("Unable to find data");
+    assert_eq!(
+        find_results.items,
+        vec![
+            MyFruit::new("Blackberry", 12),
+            MyFruit::new("Blueberry", 10),
+        ]
+    );
     print_details("Previous (second) page", &find_results);
 
     db.collection("myfruits")
         .drop(None)
         .expect("Unable to drop collection");
-}
-
-fn create_options(limit: i64, skip: i64) -> FindOptions {
-    FindOptions::builder()
-        .limit(limit)
-        .skip(skip)
-        .sort(doc! { "name": 1 })
-        .build()
-}
-
-fn print_details(name: &str, find_results: &FindResult<MyFruit>) {
-    println!(
-        "{}:\nitems: {:?}\ntotal: {}\nnext: {:?}\nprevious: {:?}\nhas_previous: {}\nhas_next: {}",
-        name,
-        find_results.items,
-        find_results.total_count,
-        find_results.page_info.next_cursor,
-        find_results.page_info.start_cursor,
-        find_results.page_info.has_previous_page,
-        find_results.page_info.has_next_page,
-    );
-    println!("-----------------");
 }
