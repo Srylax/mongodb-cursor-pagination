@@ -8,16 +8,16 @@
 pub mod error;
 mod options;
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use bson::{doc, oid::ObjectId, Bson, Document};
 use error::CursorError;
+use futures_util::stream::StreamExt;
 use log::warn;
 use mongodb::{options::FindOptions, Collection};
 use options::CursorOptions;
-use serde::{Deserialize, Serialize};
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
 use serde::de::DeserializeOwned;
-use futures_util::stream::StreamExt;
+use serde::{Deserialize, Serialize};
 
 /// Provides details about if there are more pages and the cursor to the start of the list and end
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -127,9 +127,15 @@ impl<'a> PaginatedCursor {
     }
 
     /// Estimates the number of documents in the collection using collection metadata.
-    pub async fn estimated_document_count<T>(&self, collection: &Collection<T>) -> Result<u64, CursorError> {
+    pub async fn estimated_document_count<T>(
+        &self,
+        collection: &Collection<T>,
+    ) -> Result<u64, CursorError> {
         let count_options = self.options.clone();
-        let total_count = collection.estimated_document_count(count_options).await.unwrap();
+        let total_count = collection
+            .estimated_document_count(count_options)
+            .await
+            .unwrap();
         Ok(total_count)
     }
 
@@ -163,7 +169,7 @@ impl<'a> PaginatedCursor {
         filter: Option<&Document>,
     ) -> Result<FindResult<T>, CursorError>
     where
-        T: DeserializeOwned + Sync + Send + Unpin + Clone
+        T: DeserializeOwned + Sync + Send + Unpin + Clone,
     {
         // first count the docs
         let total_count = self.count_documents(collection, filter).await.unwrap();
@@ -182,7 +188,7 @@ impl<'a> PaginatedCursor {
             // build the cursor
             let query_doc = self.get_query(filter)?;
             let mut options = self.options.clone();
-            let skip_value = options.skip.unwrap_or_else(|| 0);
+            let skip_value = options.skip.unwrap_or(0);
             if self.has_cursor || skip_value == 0 {
                 options.skip = None;
             } else {
@@ -279,14 +285,13 @@ impl<'a> PaginatedCursor {
             Bson::Document(d) => {
                 let some_value = d.get(parts[0]);
                 match some_value {
-                    Some(value) =>
-                        match value {
-                            Bson::Document(d) => {
-                                self.get_value_from_doc(parts[1], Bson::Document(d.clone()))
-                            }
-                            _ => Some((parts[0].to_string(), value.clone())),
-                        },
-                    None => None
+                    Some(value) => match value {
+                        Bson::Document(d) => {
+                            self.get_value_from_doc(parts[1], Bson::Document(d.clone()))
+                        }
+                        _ => Some((parts[0].to_string(), value.clone())),
+                    },
+                    None => None,
                 }
             }
             _ => Some((parts[0].to_string(), doc)),
@@ -297,7 +302,8 @@ impl<'a> PaginatedCursor {
         let mut only_sort_keys = Document::new();
         if let Some(sort) = &self.options.sort {
             for key in sort.keys() {
-                if let Some((_, value)) = self.get_value_from_doc(key, Bson::Document(doc.clone())) {
+                if let Some((_, value)) = self.get_value_from_doc(key, Bson::Document(doc.clone()))
+                {
                     only_sort_keys.insert(key, value);
                 }
             }
@@ -346,7 +352,9 @@ impl<'a> PaginatedCursor {
                 }
                 if queries.len() > 1 {
                     query_doc = doc! { "$or": [] };
-                    let or_array = query_doc.get_array_mut("$or").map_err(|_| CursorError::Unknown("Unable to process".into()))?;
+                    let or_array = query_doc
+                        .get_array_mut("$or")
+                        .map_err(|_| CursorError::Unknown("Unable to process".into()))?;
                     for d in queries.iter() {
                         or_array.push(Bson::Document(d.clone()));
                     }
