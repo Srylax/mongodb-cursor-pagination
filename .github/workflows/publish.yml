@@ -19,6 +19,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: 'refs/heads/master'
+          token: ${{ secrets.PAT }}
       - name: Install cargo bump
         run: cargo install cargo-bump
       - name: Bump Version
