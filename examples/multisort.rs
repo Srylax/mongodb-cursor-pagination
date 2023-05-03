@@ -1,24 +1,22 @@
-#[macro_use]
-extern crate bson;
-#[macro_use]
-extern crate serde;
-
-extern crate mongodb;
-extern crate mongodb_cursor_pagination;
-
 use crate::helper::{create_options, print_details, MyFruit};
+use bson::{doc, Document};
 use mongodb::Client;
 use mongodb_cursor_pagination::{CursorDirections, FindResult, PaginatedCursor};
 
 mod helper;
 
-fn main() {
-    let client =
-        Client::with_uri_str("mongodb://localhost:27017/").expect("Failed to initialize client.");
+#[tokio::main]
+async fn main() {
+    let client = Client::with_uri_str("mongodb://localhost:27017/")
+        .await
+        .expect("Failed to initialize client.");
     let db = client.database("mongodb_cursor_pagination");
 
     // Ensure there is no collection myfruits
-    let _ = db.collection("myfruits").drop(None);
+    db.collection::<MyFruit>("myfruits")
+        .drop(None)
+        .await
+        .expect("Failed to drop table");
 
     let docs = vec![
         doc! { "name": "Apple", "how_many": 5 },
@@ -41,12 +39,14 @@ fn main() {
 
     db.collection("myfruits")
         .insert_many(docs, None)
+        .await
         .expect("Unable to insert data");
 
     // query page 1, 2 at a time
     let mut options = create_options(3, 0);
     let mut find_results: FindResult<MyFruit> = PaginatedCursor::new(Some(options), None, None)
         .find(&db.collection("myfruits"), None)
+        .await
         .expect("Unable to find data");
     assert_eq!(
         find_results.items,
@@ -63,6 +63,7 @@ fn main() {
     let mut cursor = find_results.page_info.next_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Next))
         .find(&db.collection("myfruits"), None)
+        .await
         .expect("Unable to find data");
     assert_eq!(
         find_results.items,
@@ -79,6 +80,7 @@ fn main() {
     cursor = find_results.page_info.start_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), None)
+        .await
         .expect("Unable to find data");
     assert_eq!(
         find_results.items,
@@ -94,6 +96,7 @@ fn main() {
     options = create_options(3, 4);
     find_results = PaginatedCursor::new(Some(options), None, None)
         .find(&db.collection("myfruits"), None)
+        .await
         .expect("Unable to find data");
     assert_eq!(
         find_results.items,
@@ -113,6 +116,7 @@ fn main() {
     cursor = find_results.page_info.start_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), None)
+        .await
         .expect("Unable to find data");
     assert_eq!(
         find_results.items,
@@ -129,6 +133,7 @@ fn main() {
     cursor = find_results.page_info.start_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), None)
+        .await
         .expect("Unable to find data");
     assert_eq!(find_results.items, vec![MyFruit::new("Apple", 5),]);
     print_details(
@@ -136,7 +141,8 @@ fn main() {
         &find_results,
     );
 
-    db.collection("myfruits")
+    db.collection::<Document>("myfruits")
         .drop(None)
+        .await
         .expect("Unable to drop collection");
 }
