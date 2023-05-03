@@ -1,0 +1,32 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+    tags:
+      - '*'
+
+
+env:
+  CARGO_TERM_COLOR: always
+  
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install cargo bump
+        run: cargo install cargo-bump
+      - name: Bump Version
+        run: cargo bump ${{ github.ref_name }}
+      - name: Commit new Version
+        uses: EndBug/add-and-commit@v9
+        with:
+          author_name: Cargo Bump
+          message: 'Bump of Release ${{ github.ref_name }}'
+          pathspec_error_handling: exitAtEnd
+      - name: Publish crate
+        run: cargo publish --token ${CRATES_TOKEN}
+        env:
+          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
