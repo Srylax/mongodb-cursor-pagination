@@ -1,8 +1,10 @@
+use bson::doc;
 use mongodb::options::FindOptions;
 use mongodb_cursor_pagination::FindResult;
+use serde::Deserialize;
 use std::fmt::Debug;
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
 pub struct MyFruit {
     name: String,
     how_many: i32,
@@ -18,7 +20,7 @@ impl MyFruit {
     }
 }
 
-pub fn create_options(limit: i64, skip: i64) -> FindOptions {
+pub fn create_options(limit: i64, skip: u64) -> FindOptions {
     FindOptions::builder()
         .limit(limit)
         .skip(skip)
