@@ -1,17 +1,7 @@
-#[macro_use]
-extern crate bson;
-#[macro_use]
-extern crate serde;
-
-extern crate mongodb;
-extern crate mongodb_cursor_pagination;
-
 use crate::helper::{create_options, print_details, MyFruit};
 use bson::doc;
 use mongodb::Client;
-use mongodb::{options::FindOptions, Client};
 use mongodb_cursor_pagination::{CursorDirections, FindResult, PaginatedCursor};
-use serde::Deserialize;
 
 mod helper;
 
@@ -23,7 +13,10 @@ async fn main() {
     let db = client.database("mongodb_cursor_pagination");
 
     // Ensure there is no collection myfruits
-    let _ = db.collection("myfruits").drop(None);
+    db.collection::<MyFruit>("myfruits")
+        .drop(None)
+        .await
+        .expect("Failed to drop table");
 
     let docs = vec![
         doc! { "name": "Apple", "how_many": 5 },
