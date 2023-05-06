@@ -1,9 +1,130 @@
-//! Based on the [node module](https://github.com/mixmaxhq/mongo-cursor-pagination) but for Rust.
-//! You can read more about it on their [blog post](https://engineering.mixmax.com/blog/api-paging-built-the-right-way/) and why it seems necessary.
+#![doc = include_str!("../README.md")]
+
+//! ### Usage:
+//! The usage is a bit different than the node version. See the examples for more details and a working example.
+//! ```rust
+//! use mongodb::{options::FindOptions, Client};
+//! use mongodb_cursor_pagination::{CursorDirections, FindResult, PaginatedCursor};
+//! use bson::doc;
+//! use serde::Deserialize;
 //!
-//! So far it only supports count and find. Search and aggregation will come when needed.
+//! // Note that your data structure must derive Deserialize
+//! #[derive(Debug, Deserialize, PartialEq, Clone)]
+//! pub struct MyFruit {
+//!     name: String,
+//!     how_many: i32,
+//! }
+//! #  impl MyFruit {
+//! #     #[must_use]
+//! #     pub fn new(name: impl Into<String>, how_many: i32) -> Self {
+//! #         Self {
+//! #             name: name.into(),
+//! #             how_many,
+//! #         }
+//! #     }
+//! # }
 //!
-//! The usage is a bit different than the node version. See the examples for more details.
+//! #[tokio::main]
+//! async fn main() {
+//!     let client = Client::with_uri_str("mongodb://localhost:27017/")
+//!         .await
+//!         .expect("Failed to initialize client.");
+//!     let db = client.database("mongodb_cursor_pagination");
+//!   #  db.collection::<MyFruit>("myfruits")
+//!   #      .drop(None)
+//!   #      .await
+//!   #      .expect("Failed to drop table");
+//!
+//!     let docs = vec![
+//!         doc! { "name": "Apple", "how_many": 5 },
+//!         doc! { "name": "Orange", "how_many": 3 },
+//!         doc! { "name": "Blueberry", "how_many": 25 },
+//!         doc! { "name": "Bananas", "how_many": 8 },
+//!         doc! { "name": "Grapes", "how_many": 12 },
+//!     ];
+//!
+//!     db.collection("myfruits")
+//!         .insert_many(docs, None)
+//!         .await
+//!         .expect("Unable to insert data");
+//!
+//!     // query page 1, 2 at a time
+//!     let options = FindOptions::builder()
+//!             .limit(2)
+//!             .sort(doc! { "name": 1 })
+//!             .build();
+//!
+//!     let mut find_results: FindResult<MyFruit> = PaginatedCursor::new(Some(options.clone()), None, None)
+//!         .find(&db.collection("myfruits"), None)
+//!         .await
+//!         .expect("Unable to find data");
+//!   #  assert_eq!(
+//!   #     find_results.items,
+//!   #     vec![MyFruit::new("Apple", 5), MyFruit::new("Bananas", 8),]
+//!   # );
+//!     println!("First page: {:?}", find_results);
+//!
+//!     // get the second page
+//!     let mut cursor = find_results.page_info.next_cursor;
+//!     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Next))
+//!         .find(&db.collection("myfruits"), None)
+//!         .await
+//!         .expect("Unable to find data");
+//!   #  assert_eq!(
+//!   #    find_results.items,
+//!   #     vec![MyFruit::new("Blueberry", 25), MyFruit::new("Grapes", 12),]
+//!   # );
+//!     println!("Second page: {:?}", find_results);
+//! }
+//! ```
+//!
+//! ### Response
+//! The response `FindResult<T>` contains page info, cursors and edges (cursors for all of the items in the response).
+//! ```rust
+//! pub struct PageInfo {
+//!     pub has_next_page: bool,
+//!     pub has_previous_page: bool,
+//!     pub start_cursor: Option<String>,
+//!     pub next_cursor: Option<String>,
+//! }
+//!
+//! pub struct Edge {
+//!     pub cursor: String,
+//! }
+//!
+//! pub struct FindResult<T> {
+//!     pub page_info: PageInfo,
+//!     pub edges: Vec<Edge>,
+//!     pub total_count: i64,
+//!     pub items: Vec<T>,
+//! }
+//! ```
+//!
+//! ## Features
+//! It has support for graphql (using [juniper](https://github.com/graphql-rust/juniper)) if you enable the `graphql` flag. You can use it by just including the `PageInfo` into your code.
+//!
+//! ```ignore
+//! use mongodb_cursor_pagination::{PageInfo, Edge};
+//!
+//! #[derive(Serialize, Deserialize)]
+//! struct MyDataConnection {
+//!     page_info: PageInfo,
+//!     edges: Vec<Edge>,
+//!     data: Vec<MyData>,
+//!     total_count: i64,
+//! }
+//!
+//! [juniper::object]
+//! impl MyDataConnection {
+//!     fn page_info(&self) -> &PageInfo {
+//!         self.page_info
+//!     }
+//!
+//!     fn edges(&self) -> &Vec<Edge> {
+//!         &self.edges
+//!     }
+//! }
+//! ```
 
 pub mod error;
 mod options;
@@ -97,11 +218,11 @@ pub struct PaginatedCursor {
 }
 
 impl<'a> PaginatedCursor {
-    /// Updates or creates all of the find options to help with pagination and returns a PaginatedCursor object.
+    /// Updates or creates all of the find options to help with pagination and returns a `PaginatedCursor` object.
     ///
     /// # Arguments
     /// * `options` - Optional find options that you would like to perform any searches with
-    /// * `cursor` - An optional existing cursor in base64. This would have come from a previous FindResult<T>
+    /// * `cursor` - An optional existing cursor in base64. This would have come from a previous `FindResult<T>`
     /// * `direction` - Determines whether the cursor supplied is for a previous page or the next page. Defaults to Next
     ///
     pub fn new(
