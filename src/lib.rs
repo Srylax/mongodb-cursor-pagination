@@ -158,9 +158,10 @@ use mongodb::{options::FindOptions, Collection};
 use options::CursorOptions;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::ops::Neg;
 
 /// Provides details about if there are more pages and the cursor to the start of the list and end
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct PageInfo {
     pub has_next_page: bool,
     pub has_previous_page: bool,
@@ -212,7 +213,7 @@ impl From<&Edge> for Edge {
 }
 
 /// The result of a find method with the items, edges, pagination info, and total count of objects
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct FindResult<T> {
     pub page_info: PageInfo,
     pub edges: Vec<Edge>,
@@ -256,7 +257,7 @@ impl PaginatedCursor {
             cursor_doc: cursor.map_or_else(Document::new, |b64| {
                 map_from_base64(b64).expect("Unable to parse cursor")
             }),
-            direction: direction.map_or(CursorDirections::Next, |d| d),
+            direction: direction.unwrap_or(CursorDirections::Next),
             options: CursorOptions::from(options),
         }
     }
@@ -314,86 +315,86 @@ impl PaginatedCursor {
         let mut start_cursor: Option<String> = None;
         let mut next_cursor: Option<String> = None;
 
-        // make the query if we have some docs
-        if total_count > 0 {
-            // build the cursor
-            let query_doc = self.get_query(filter.cloned())?;
-            let mut options = self.options.clone();
-            let skip_value = options.skip.unwrap_or(0);
-            if self.has_cursor || skip_value == 0 {
-                options.skip = None;
-            } else {
-                has_skip = true;
-            }
-            // let has_previous
-            let is_previous_query = self.has_cursor && self.direction == CursorDirections::Previous;
-            // if it's a previous query we need to reverse the sort we were doing
-            if is_previous_query {
-                if let Some(sort) = options.sort {
-                    let keys: Vec<&String> = sort.keys().collect();
-                    let mut new_sort = Document::new();
-                    for key in keys {
-                        let bson_value = sort.get(key).unwrap();
-                        match bson_value {
-                            Bson::Int32(value) => {
-                                new_sort.insert(key, Bson::Int32(-*value));
-                            }
-                            Bson::Int64(value) => {
-                                new_sort.insert(key, Bson::Int64(-*value));
-                            }
-                            _ => {}
-                        };
+        // return if we if have no docs
+        if total_count == 0 {
+            return Ok(FindResult {
+                page_info: Default::default(),
+                edges: vec![],
+                total_count: 0,
+                items: vec![],
+            });
+        }
+
+        // build the cursor
+        let query_doc = self.get_query(filter.cloned())?;
+        let mut options = self.options.clone();
+        let skip_value = options.skip.unwrap_or(0);
+        if self.has_cursor || skip_value == 0 {
+            options.skip = None;
+        } else {
+            has_skip = true;
+        }
+        // let has_previous
+        let is_previous_query = self.has_cursor && self.direction == CursorDirections::Previous;
+        // if it's a previous query we need to reverse the sort we were doing
+        if is_previous_query {
+            if let Some(sort) = options.sort.as_mut() {
+                sort.iter_mut().for_each(|(_key, value)| {
+                    if let Bson::Int32(num) = value {
+                        *value = Bson::Int32(num.neg());
                     }
-                    options.sort = Some(new_sort);
+                    if let Bson::Int64(num) = value {
+                        *value = Bson::Int64(num.neg());
+                    }
+                });
+            }
+        }
+        let mut cursor = collection.find(query_doc, options).await.unwrap();
+        while let Some(result) = cursor.next().await {
+            match result {
+                Ok(doc) => {
+                    let item = bson::from_bson(Bson::Document(doc.clone())).unwrap();
+                    edges.push(Edge {
+                        cursor: self.create_from_doc(&doc),
+                    });
+                    items.push(item);
+                }
+                Err(error) => {
+                    warn!("Error to find doc: {}", error);
                 }
             }
-            let mut cursor = collection.find(query_doc, options).await.unwrap();
-            while let Some(result) = cursor.next().await {
-                match result {
-                    Ok(doc) => {
-                        let item = bson::from_bson(Bson::Document(doc.clone())).unwrap();
-                        edges.push(Edge {
-                            cursor: self.create_from_doc(&doc),
-                        });
-                        items.push(item);
-                    }
-                    Err(error) => {
-                        warn!("Error to find doc: {}", error);
-                    }
-                }
-            }
-            let has_more: bool;
-            if has_skip {
-                has_more = (items.len() as u64).saturating_add(skip_value) < total_count;
-                has_previous_page = true;
-                has_next_page = has_more;
-            } else {
-                has_more = items.len() as i64 > self.options.limit.unwrap().saturating_sub(1);
-                has_previous_page = (self.has_cursor && self.direction == CursorDirections::Next)
-                    || (is_previous_query && has_more);
-                has_next_page = (self.direction == CursorDirections::Next && has_more)
-                    || (is_previous_query && self.has_cursor);
-            }
+        }
+        let has_more: bool;
+        if has_skip {
+            has_more = (items.len() as u64).saturating_add(skip_value) < total_count;
+            has_previous_page = true;
+            has_next_page = has_more;
+        } else {
+            has_more = items.len() as i64 > self.options.limit.unwrap().saturating_sub(1);
+            has_previous_page = (self.has_cursor && self.direction == CursorDirections::Next)
+                || (is_previous_query && has_more);
+            has_next_page = (self.direction == CursorDirections::Next && has_more)
+                || (is_previous_query && self.has_cursor);
+        }
 
-            // reorder if we are going backwards
-            if is_previous_query {
-                items.reverse();
-                edges.reverse();
-            }
-            // remove the extra item to check if we have more
-            if has_more && !is_previous_query {
-                items.pop();
-                edges.pop();
-            } else if has_more {
-                items.remove(0);
-                edges.remove(0);
-            }
+        // reorder if we are going backwards
+        if is_previous_query {
+            items.reverse();
+            edges.reverse();
+        }
+        // remove the extra item to check if we have more
+        if has_more && !is_previous_query {
+            items.pop();
+            edges.pop();
+        } else if has_more {
+            items.remove(0);
+            edges.remove(0);
+        }
 
-            // create the next cursor
-            if !items.is_empty() && edges.len() == items.len() {
-                start_cursor = Some(edges[0].cursor.clone());
-                next_cursor = Some(edges[items.len().saturating_sub(1)].cursor.clone());
-            }
+        // create the next cursor
+        if !items.is_empty() && edges.len() == items.len() {
+            start_cursor = Some(edges[0].cursor.clone());
+            next_cursor = Some(edges[items.len().saturating_sub(1)].cursor.clone());
         }
 
         let page_info = PageInfo {
