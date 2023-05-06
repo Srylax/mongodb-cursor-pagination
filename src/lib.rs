@@ -364,11 +364,11 @@ impl PaginatedCursor {
             }
             let has_more: bool;
             if has_skip {
-                has_more = (items.len() as u64 + skip_value) < total_count;
+                has_more = (items.len() as u64).saturating_add(skip_value) < total_count;
                 has_previous_page = true;
                 has_next_page = has_more;
             } else {
-                has_more = items.len() > (self.options.limit.unwrap() - 1) as usize;
+                has_more = items.len() as i64 > self.options.limit.unwrap().saturating_sub(1);
                 has_previous_page = (self.has_cursor && self.direction == CursorDirections::Next)
                     || (is_previous_query && has_more);
                 has_next_page = (self.direction == CursorDirections::Next && has_more)
@@ -392,7 +392,7 @@ impl PaginatedCursor {
             // create the next cursor
             if !items.is_empty() && edges.len() == items.len() {
                 start_cursor = Some(edges[0].cursor.clone());
-                next_cursor = Some(edges[items.len() - 1].cursor.clone());
+                next_cursor = Some(edges[items.len().saturating_sub(1)].cursor.clone());
             }
         }
 

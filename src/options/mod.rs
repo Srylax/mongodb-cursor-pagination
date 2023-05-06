@@ -31,7 +31,7 @@ pub struct CursorOptions {
 impl From<Option<FindOptions>> for CursorOptions {
     fn from(options: Option<FindOptions>) -> Self {
         let old_opts = options.unwrap_or_else(|| FindOptions::builder().build());
-        let limit = old_opts.limit.unwrap_or(DEFAULT_LIMIT).wrapping_add(1);
+        let limit = old_opts.limit.unwrap_or(DEFAULT_LIMIT).saturating_add(1);
         // check the sort
         let mut sort = old_opts.sort.unwrap_or_default();
         if !sort.contains_key("_id") {
