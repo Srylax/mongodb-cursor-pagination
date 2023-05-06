@@ -236,7 +236,7 @@ pub struct PaginatedCursor {
     options: CursorOptions,
 }
 
-impl<'a> PaginatedCursor {
+impl PaginatedCursor {
     /// Updates or creates all of the find options to help with pagination and returns a `PaginatedCursor` object.
     ///
     /// # Arguments
@@ -420,7 +420,7 @@ impl<'a> PaginatedCursor {
     }
 
     fn get_value_from_doc(&self, key: &str, doc: Bson) -> Option<(String, Bson)> {
-        let parts: Vec<&str> = key.splitn(2, ".").collect();
+        let parts: Vec<&str> = key.splitn(2, '.').collect();
         match doc {
             Bson::Document(d) => {
                 let some_value = d.get(parts[0]);
@@ -486,7 +486,7 @@ impl<'a> PaginatedCursor {
                     }
                     // insert the directional sort (ie. < or >)
                     let value = self.cursor_doc.get(keys[i]).unwrap_or(&Bson::Null);
-                    let direction = self.get_direction_from_key(&sort, keys[i]);
+                    let direction = self.get_direction_from_key(sort, keys[i]);
                     query.insert(keys[i], doc! { direction: value.clone() });
                     queries.push(query);
                 }
@@ -504,7 +504,7 @@ impl<'a> PaginatedCursor {
             } else {
                 // this is the simplest form, it's just a sort by _id
                 let object_id = self.cursor_doc.get("_id").unwrap().clone();
-                let direction = self.get_direction_from_key(&sort, "_id");
+                let direction = self.get_direction_from_key(sort, "_id");
                 query_doc.insert("_id", doc! { direction: object_id });
             }
         }
@@ -534,7 +534,7 @@ impl<'a> PaginatedCursor {
 
 fn map_from_base64(base64_string: String) -> Result<Document, CursorError> {
     // change from base64
-    let decoded = STANDARD.decode(&base64_string)?;
+    let decoded = STANDARD.decode(base64_string)?;
     // decode from bson
     let cursor_doc = bson::from_slice(decoded.as_slice()).unwrap();
     Ok(cursor_doc)

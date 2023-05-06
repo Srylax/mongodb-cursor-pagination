@@ -28,7 +28,7 @@ impl From<base64::DecodeError> for CursorError {
 }
 
 impl fmt::Display for CursorError {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             CursorError::IoError(ref inner) => inner.fmt(fmt),
             CursorError::InvalidCursor(ref cursor) => {
