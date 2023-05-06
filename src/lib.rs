@@ -221,7 +221,7 @@ pub struct FindResult<T> {
 }
 
 /// The direction of the list, ie. you are sending a cursor for the next or previous items. Defaults to Next
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CursorDirections {
     Previous,
     Next,
@@ -244,24 +244,19 @@ impl PaginatedCursor {
     /// * `cursor` - An optional existing cursor in base64. This would have come from a previous `FindResult<T>`
     /// * `direction` - Determines whether the cursor supplied is for a previous page or the next page. Defaults to Next
     ///
+    #[must_use]
     pub fn new(
         options: Option<FindOptions>,
         cursor: Option<String>,
         direction: Option<CursorDirections>,
     ) -> Self {
-        PaginatedCursor {
+        Self {
             // parse base64 for keys
             has_cursor: cursor.is_some(),
-            cursor_doc: if let Some(b64) = cursor {
+            cursor_doc: cursor.map_or_else(Document::new, |b64| {
                 map_from_base64(b64).expect("Unable to parse cursor")
-            } else {
-                Document::new()
-            },
-            direction: if let Some(d) = direction {
-                d
-            } else {
-                CursorDirections::Next
-            },
+            }),
+            direction: direction.map_or(CursorDirections::Next, |d| d),
             options: CursorOptions::from(options),
         }
     }
@@ -290,11 +285,7 @@ impl PaginatedCursor {
         let mut count_options = self.options.clone();
         count_options.limit = None;
         count_options.skip = None;
-        let count_query = if let Some(q) = query {
-            q.clone()
-        } else {
-            Document::new()
-        };
+        let count_query = query.map_or_else(Document::new, Clone::clone);
         let total_count = collection
             .count_documents(count_query, count_options)
             .await
@@ -326,7 +317,7 @@ impl PaginatedCursor {
         // make the query if we have some docs
         if total_count > 0 {
             // build the cursor
-            let query_doc = self.get_query(filter)?;
+            let query_doc = self.get_query(filter.cloned())?;
             let mut options = self.options.clone();
             let skip_value = options.skip.unwrap_or(0);
             if self.has_cursor || skip_value == 0 {
@@ -360,7 +351,7 @@ impl PaginatedCursor {
             while let Some(result) = cursor.next().await {
                 match result {
                     Ok(doc) => {
-                        let item = bson::from_bson(bson::Bson::Document(doc.clone())).unwrap();
+                        let item = bson::from_bson(Bson::Document(doc.clone())).unwrap();
                         edges.push(Edge {
                             cursor: self.create_from_doc(&doc),
                         });
@@ -400,8 +391,8 @@ impl PaginatedCursor {
 
             // create the next cursor
             if !items.is_empty() && edges.len() == items.len() {
-                start_cursor = Some(edges[0].cursor.to_owned());
-                next_cursor = Some(edges[items.len() - 1].cursor.to_owned());
+                start_cursor = Some(edges[0].cursor.clone());
+                next_cursor = Some(edges[items.len() - 1].cursor.clone());
             }
         }
 
@@ -413,8 +404,8 @@ impl PaginatedCursor {
         };
         Ok(FindResult {
             page_info,
-            total_count,
             edges,
+            total_count,
             items,
         })
     }
@@ -422,25 +413,17 @@ impl PaginatedCursor {
     fn get_value_from_doc(&self, key: &str, doc: Bson) -> Option<(String, Bson)> {
         let parts: Vec<&str> = key.splitn(2, '.').collect();
         match doc {
-            Bson::Document(d) => {
-                let some_value = d.get(parts[0]);
-                match some_value {
-                    Some(value) => match value {
-                        Bson::Document(d) => {
-                            self.get_value_from_doc(parts[1], Bson::Document(d.clone()))
-                        }
-                        _ => Some((parts[0].to_string(), value.clone())),
-                    },
-                    None => None,
-                }
-            }
+            Bson::Document(d) => d.get(parts[0]).and_then(|value| match value {
+                Bson::Document(d) => self.get_value_from_doc(parts[1], Bson::Document(d.clone())),
+                _ => Some((parts[0].to_string(), value.clone())),
+            }),
             _ => Some((parts[0].to_string(), doc)),
         }
     }
 
     fn create_from_doc(&self, doc: &Document) -> String {
         let mut only_sort_keys = Document::new();
-        if let Some(sort) = &self.options.sort {
+        self.options.sort.as_ref().map_or_else(String::new, |sort| {
             for key in sort.keys() {
                 if let Some((_, value)) = self.get_value_from_doc(key, Bson::Document(doc.clone()))
                 {
@@ -449,9 +432,7 @@ impl PaginatedCursor {
             }
             let buf = bson::to_vec(&only_sort_keys).unwrap();
             STANDARD.encode(buf)
-        } else {
-            "".to_owned()
-        }
+        })
     }
 
     /*
@@ -463,12 +444,9 @@ impl PaginatedCursor {
     _id: { $lt: nextId }
     }]
     */
-    fn get_query(&self, query: Option<&Document>) -> Result<Document, CursorError> {
+    fn get_query(&self, query: Option<Document>) -> Result<Document, CursorError> {
         // now create the filter
-        let mut query_doc = match query {
-            Some(doc) => doc.clone(),
-            None => Document::new(),
-        };
+        let mut query_doc = query.unwrap_or_default();
 
         if self.cursor_doc.is_empty() {
             return Ok(query_doc);
@@ -495,7 +473,7 @@ impl PaginatedCursor {
                     let or_array = query_doc
                         .get_array_mut("$or")
                         .map_err(|_| CursorError::Unknown("Unable to process".into()))?;
-                    for d in queries.iter() {
+                    for d in &queries {
                         or_array.push(Bson::Document(d.clone()));
                     }
                 } else {
@@ -540,7 +518,7 @@ fn map_from_base64(base64_string: String) -> Result<Document, CursorError> {
     Ok(cursor_doc)
 }
 
-/// Converts an id into a MongoDb ObjectId
+/// Converts an id into a `MongoDb` `ObjectId`
 pub fn get_object_id(id: &str) -> Result<ObjectId, CursorError> {
     let object_id = match ObjectId::parse_str(id) {
         Ok(object_id) => object_id,

@@ -12,7 +12,7 @@ pub struct CursorOptions {
     pub comment: Option<String>,
     pub cursor_type: Option<mongodb::options::CursorType>,
     pub hint: Option<mongodb::options::Hint>,
-    pub limit: Option<u64>,
+    pub limit: Option<i64>,
     pub max: Option<Document>,
     pub max_await_time: Option<std::time::Duration>,
     pub max_scan: Option<u64>,
@@ -29,32 +29,22 @@ pub struct CursorOptions {
 }
 
 impl From<Option<FindOptions>> for CursorOptions {
-    fn from(options: Option<FindOptions>) -> CursorOptions {
-        let old_opts = match options {
-            Some(o) => o,
-            None => FindOptions::builder().build(),
-        };
-        let limit = match old_opts.limit {
-            Some(l) => Some(l + 1),
-            None => Some(DEFAULT_LIMIT + 1),
-        };
-        let limit = limit.map(|l| l as u64);
+    fn from(options: Option<FindOptions>) -> Self {
+        let old_opts = options.unwrap_or_else(|| FindOptions::builder().build());
+        let limit = old_opts.limit.unwrap_or(DEFAULT_LIMIT).wrapping_add(1);
         // check the sort
-        let mut sort = match &old_opts.sort {
-            Some(s) => s.clone(),
-            None => Document::new(),
-        };
+        let mut sort = old_opts.sort.unwrap_or_default();
         if !sort.contains_key("_id") {
             sort.insert("_id", -1);
         }
-        CursorOptions {
+        Self {
             allow_partial_results: old_opts.allow_partial_results,
             batch_size: old_opts.batch_size,
             collation: old_opts.collation.clone(),
             comment: old_opts.comment.clone(),
             cursor_type: old_opts.cursor_type,
             hint: old_opts.hint.clone(),
-            limit,
+            limit: Some(limit),
             max: old_opts.max.clone(),
             max_await_time: old_opts.max_await_time,
             max_scan: old_opts.max_scan,
@@ -73,7 +63,7 @@ impl From<Option<FindOptions>> for CursorOptions {
 }
 
 impl From<CursorOptions> for Option<FindOptions> {
-    fn from(options: CursorOptions) -> Option<FindOptions> {
+    fn from(options: CursorOptions) -> Self {
         let find_options = FindOptions::builder()
             .allow_partial_results(options.allow_partial_results)
             .batch_size(options.batch_size)
@@ -81,7 +71,7 @@ impl From<CursorOptions> for Option<FindOptions> {
             .comment(options.comment)
             .cursor_type(options.cursor_type)
             .hint(options.hint)
-            .limit(options.limit.map(|l| l as i64))
+            .limit(options.limit)
             .max(options.max)
             .max_await_time(options.max_await_time)
             .max_scan(options.max_scan)
@@ -101,11 +91,11 @@ impl From<CursorOptions> for Option<FindOptions> {
 }
 
 impl From<CursorOptions> for Option<CountOptions> {
-    fn from(options: CursorOptions) -> Option<CountOptions> {
+    fn from(options: CursorOptions) -> Self {
         let count_options = CountOptions::builder()
             .collation(options.collation)
             .hint(options.hint)
-            .limit(options.limit)
+            .limit(options.limit.map(|i| i as u64))
             .max_time(options.max_time)
             .skip(options.skip)
             .build();
@@ -114,7 +104,7 @@ impl From<CursorOptions> for Option<CountOptions> {
 }
 
 impl From<CursorOptions> for Option<EstimatedDocumentCountOptions> {
-    fn from(options: CursorOptions) -> Option<EstimatedDocumentCountOptions> {
+    fn from(options: CursorOptions) -> Self {
         let count_options = EstimatedDocumentCountOptions::builder()
             .max_time(options.max_time)
             .selection_criteria(options.selection_criteria)
