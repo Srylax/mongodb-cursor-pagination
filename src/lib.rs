@@ -148,14 +148,15 @@
 pub mod error;
 mod options;
 
+use crate::options::CursorOptions;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use bson::{doc, oid::ObjectId, Bson, Document};
 use error::CursorError;
 use futures_util::stream::StreamExt;
 use log::warn;
+use mongodb::options::{CountOptions, EstimatedDocumentCountOptions};
 use mongodb::{options::FindOptions, Collection};
-use options::CursorOptions;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::ops::Neg;
@@ -258,7 +259,7 @@ impl PaginatedCursor {
                 map_from_base64(b64).expect("Unable to parse cursor")
             }),
             direction: direction.unwrap_or(CursorDirections::Next),
-            options: CursorOptions::from(options),
+            options: CursorOptions::from(options.unwrap_or_default()),
         }
     }
 
@@ -267,9 +268,10 @@ impl PaginatedCursor {
         &self,
         collection: &Collection<T>,
     ) -> Result<u64, CursorError> {
-        let count_options = self.options.clone();
         let total_count = collection
-            .estimated_document_count(count_options)
+            .estimated_document_count(Some(EstimatedDocumentCountOptions::from(
+                self.options.clone(),
+            )))
             .await
             .unwrap();
         Ok(total_count)
@@ -288,7 +290,7 @@ impl PaginatedCursor {
         count_options.skip = None;
         let count_query = query.map_or_else(Document::new, Clone::clone);
         let total_count = collection
-            .count_documents(count_query, count_options)
+            .count_documents(count_query, Some(CountOptions::from(count_options)))
             .await
             .unwrap();
         Ok(total_count)
@@ -349,7 +351,7 @@ impl PaginatedCursor {
                 });
             }
         }
-        let mut cursor = collection.find(query_doc, options).await.unwrap();
+        let mut cursor = collection.find(query_doc, Some(options.0)).await.unwrap();
         while let Some(result) = cursor.next().await {
             match result {
                 Ok(doc) => {
@@ -484,13 +486,13 @@ impl PaginatedCursor {
         query_doc = if queries.len() > 1 {
             doc! { "$or": queries.iter().as_ref() }
         } else {
-            queries[0].clone()
+            queries.pop().unwrap_or_default()
         };
         query_doc
     }
 
     fn get_direction_from_key(&self, sort: &Document, key: &str) -> &'static str {
-        let value = sort.get(key).unwrap().as_i32().unwrap();
+        let value = sort.get(key).and_then(Bson::as_i32).unwrap_or(0);
         match self.direction {
             CursorDirections::Next => {
                 if value >= 0 {
