@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 const DEFAULT_LIMIT: i64 = 25;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct CursorOptions(pub FindOptions);
+pub struct CursorOptions(FindOptions);
 
 impl Deref for CursorOptions {
     type Target = FindOptions;
@@ -29,6 +29,12 @@ impl From<FindOptions> for CursorOptions {
         }
         options.sort = Some(sort);
         Self(options)
+    }
+}
+
+impl From<CursorOptions> for FindOptions {
+    fn from(value: CursorOptions) -> Self {
+        value.0
     }
 }
 

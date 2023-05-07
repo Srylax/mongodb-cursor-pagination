@@ -320,7 +320,7 @@ impl PaginatedCursor {
         // return if we if have no docs
         if total_count == 0 {
             return Ok(FindResult {
-                page_info: Default::default(),
+                page_info: PageInfo::default(),
                 edges: vec![],
                 total_count: 0,
                 items: vec![],
@@ -351,7 +351,10 @@ impl PaginatedCursor {
                 });
             }
         }
-        let mut cursor = collection.find(query_doc, Some(options.0)).await.unwrap();
+        let mut cursor = collection
+            .find(query_doc, Some(options.into()))
+            .await
+            .unwrap();
         while let Some(result) = cursor.next().await {
             match result {
                 Ok(doc) => {
