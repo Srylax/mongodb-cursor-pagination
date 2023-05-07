@@ -1,4 +1,4 @@
-use bson::doc;
+use bson::{doc, Document};
 use mongodb::options::FindOptions;
 use mongodb_cursor_pagination::FindResult;
 use serde::Deserialize;
@@ -20,11 +20,11 @@ impl MyFruit {
     }
 }
 
-pub fn create_options(limit: i64, skip: u64) -> FindOptions {
+pub fn create_options(limit: i64, skip: u64, sort: Document) -> FindOptions {
     FindOptions::builder()
         .limit(limit)
         .skip(skip)
-        .sort(doc! { "name": 1 })
+        .sort(sort)
         .build()
 }
 
