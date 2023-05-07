@@ -326,7 +326,7 @@ impl PaginatedCursor {
         }
 
         // build the cursor
-        let query_doc = self.get_query(filter.cloned())?;
+        let query_doc = self.get_query(filter.cloned());
         let mut options = self.options.clone();
         let skip_value = options.skip.unwrap_or(0);
         if self.has_cursor || skip_value == 0 {
@@ -445,49 +445,48 @@ impl PaginatedCursor {
     _id: { $lt: nextId }
     }]
     */
-    fn get_query(&self, query: Option<Document>) -> Result<Document, CursorError> {
+    fn get_query(&self, query: Option<Document>) -> Document {
         // now create the filter
         let mut query_doc = query.unwrap_or_default();
 
+        // Don't do anything if no cursor is provided
         if self.cursor_doc.is_empty() {
-            return Ok(query_doc);
-        } else if let Some(sort) = &self.options.sort {
-            if sort.len() > 1 {
-                let keys: Vec<&String> = sort.keys().collect();
-                let mut queries: Vec<Document> = Vec::new();
-                #[allow(clippy::needless_range_loop)]
-                for i in 0..keys.len() {
-                    let mut query = query_doc.clone();
-                    #[allow(clippy::needless_range_loop)]
-                    for j in 0..i {
-                        let value = self.cursor_doc.get(keys[j]).unwrap_or(&Bson::Null);
-                        query.insert(keys[j], value.clone());
-                    }
-                    // insert the directional sort (ie. < or >)
-                    let value = self.cursor_doc.get(keys[i]).unwrap_or(&Bson::Null);
-                    let direction = self.get_direction_from_key(sort, keys[i]);
-                    query.insert(keys[i], doc! { direction: value.clone() });
-                    queries.push(query);
-                }
-                if queries.len() > 1 {
-                    query_doc = doc! { "$or": [] };
-                    let or_array = query_doc
-                        .get_array_mut("$or")
-                        .map_err(|_| CursorError::Unknown("Unable to process".into()))?;
-                    for d in &queries {
-                        or_array.push(Bson::Document(d.clone()));
-                    }
-                } else {
-                    query_doc = queries[0].clone();
-                }
-            } else {
-                // this is the simplest form, it's just a sort by _id
-                let object_id = self.cursor_doc.get("_id").unwrap().clone();
-                let direction = self.get_direction_from_key(sort, "_id");
-                query_doc.insert("_id", doc! { direction: object_id });
-            }
+            return query_doc;
         }
-        Ok(query_doc)
+        let Some(sort) = &self.options.sort else {
+            return query_doc;
+        };
+
+        // this is the simplest form, it's just a sort by _id
+        if sort.len() <= 1 {
+            let object_id = self.cursor_doc.get("_id").unwrap().clone();
+            let direction = self.get_direction_from_key(sort, "_id");
+            query_doc.insert("_id", doc! { direction: object_id });
+            return query_doc;
+        }
+
+        let mut queries: Vec<Document> = Vec::new();
+        let mut previous_conditions: Vec<(String, Bson)> = Vec::new();
+
+        // Add each sort condition with it's direction and all previous condition with fixed values
+        for key in sort.keys() {
+            let mut query = query_doc.clone();
+            query.extend(previous_conditions.clone().into_iter()); // Add previous conditions
+
+            let value = self.cursor_doc.get(key).unwrap_or(&Bson::Null);
+            let direction = self.get_direction_from_key(sort, key);
+            query.insert(key, doc! { direction: value.clone() });
+            previous_conditions.push((key.clone(), value.clone())); // Add self without direction to previous conditions
+
+            queries.push(query);
+        }
+
+        query_doc = if queries.len() > 1 {
+            doc! { "$or": queries.iter().as_ref() }
+        } else {
+            queries[0].clone()
+        };
+        query_doc
     }
 
     fn get_direction_from_key(&self, sort: &Document, key: &str) -> &'static str {
