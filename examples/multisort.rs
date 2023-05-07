@@ -43,7 +43,7 @@ async fn main() {
         .expect("Unable to insert data");
 
     // query page 1, 2 at a time
-    let mut options = create_options(3, 0);
+    let mut options = create_options(3, 0, doc! { "how_many": 1, "name": -1, "non_existent": 1 });
     let mut find_results: FindResult<MyFruit> = PaginatedCursor::new(Some(options), None, None)
         .find(&db.collection("myfruits"), None)
         .await
@@ -51,15 +51,15 @@ async fn main() {
     assert_eq!(
         find_results.items,
         vec![
-            MyFruit::new("Apple", 5),
+            MyFruit::new("Orange", 3),
             MyFruit::new("Avocado", 5),
-            MyFruit::new("Bananas", 10)
+            MyFruit::new("Apple", 5)
         ]
     );
     print_details("First page", &find_results);
 
     // get the second page
-    options = create_options(3, 0);
+    options = create_options(3, 0, doc! { "how_many": 1, "name": -1, "non_existent": 1 });
     let mut cursor = find_results.page_info.next_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Next))
         .find(&db.collection("myfruits"), None)
@@ -68,15 +68,15 @@ async fn main() {
     assert_eq!(
         find_results.items,
         vec![
-            MyFruit::new("Blackberry", 12),
             MyFruit::new("Blueberry", 10),
+            MyFruit::new("Bananas", 10),
             MyFruit::new("Grapes", 12)
         ]
     );
     print_details("Second page", &find_results);
 
     // get previous page
-    options = create_options(3, 0);
+    options = create_options(3, 0, doc! { "how_many": 1, "name": -1, "non_existent": 1 });
     cursor = find_results.page_info.start_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), None)
@@ -85,15 +85,15 @@ async fn main() {
     assert_eq!(
         find_results.items,
         vec![
-            MyFruit::new("Apple", 5),
+            MyFruit::new("Orange", 3),
             MyFruit::new("Avocado", 5),
-            MyFruit::new("Bananas", 10)
+            MyFruit::new("Apple", 5)
         ]
     );
     print_details("Previous page", &find_results);
 
     // with a skip
-    options = create_options(3, 4);
+    options = create_options(3, 4, doc! { "how_many": 1, "name": -1, "non_existent": 1 });
     find_results = PaginatedCursor::new(Some(options), None, None)
         .find(&db.collection("myfruits"), None)
         .await
@@ -101,9 +101,9 @@ async fn main() {
     assert_eq!(
         find_results.items,
         vec![
-            MyFruit::new("Blueberry", 10),
+            MyFruit::new("Bananas", 10),
             MyFruit::new("Grapes", 12),
-            MyFruit::new("Orange", 3)
+            MyFruit::new("Blackberry", 12)
         ]
     );
     print_details(
@@ -112,7 +112,7 @@ async fn main() {
     );
 
     // backwards from skipping
-    options = create_options(3, 0);
+    options = create_options(3, 0, doc! { "how_many": 1, "name": -1, "non_existent": 1 });
     cursor = find_results.page_info.start_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), None)
@@ -122,20 +122,20 @@ async fn main() {
         find_results.items,
         vec![
             MyFruit::new("Avocado", 5),
-            MyFruit::new("Bananas", 10),
-            MyFruit::new("Blackberry", 12),
+            MyFruit::new("Apple", 5),
+            MyFruit::new("Blueberry", 10),
         ]
     );
     print_details("Previous from skip", &find_results);
 
     // backwards one more time and we are all the way back
-    options = create_options(3, 0);
+    options = create_options(3, 0, doc! { "how_many": 1, "name": -1, "non_existent": 1 });
     cursor = find_results.page_info.start_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), None)
         .await
         .expect("Unable to find data");
-    assert_eq!(find_results.items, vec![MyFruit::new("Apple", 5),]);
+    assert_eq!(find_results.items, vec![MyFruit::new("Orange", 3),]);
     print_details(
         "Previous again - at beginning, but cursor was for before Avocado (so only Apple)",
         &find_results,

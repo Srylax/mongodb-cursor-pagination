@@ -47,7 +47,7 @@ async fn main() {
         .expect("Unable to insert data");
 
     // query page 1, 2 at a time
-    let mut options = create_options(2, 0);
+    let mut options = create_options(2, 0, doc! { "name": 1 });
     let filter = doc! { "$or": [
         { "name": Bson::RegularExpression(Regex { pattern: String::from("berry"), options: String::from("i") })},
         { "spanish": Bson::RegularExpression(Regex { pattern: String::from("ana"), options: String::from("i") })},
@@ -63,7 +63,7 @@ async fn main() {
     print_details("First page", &find_results);
 
     // get the second page
-    options = create_options(2, 0);
+    options = create_options(2, 0, doc! { "name": 1 });
     let mut cursor = find_results.page_info.next_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Next))
         .find(&db.collection("myfruits"), Some(&filter))
@@ -79,7 +79,7 @@ async fn main() {
     print_details("Second page", &find_results);
 
     // get previous page
-    options = create_options(2, 0);
+    options = create_options(2, 0, doc! { "name": 1 });
     cursor = find_results.page_info.start_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), Some(&filter))
@@ -92,7 +92,7 @@ async fn main() {
     print_details("Previous (first) page", &find_results);
 
     // get the second page again
-    options = create_options(2, 0);
+    options = create_options(2, 0, doc! { "name": 1 });
     cursor = find_results.page_info.next_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Next))
         .find(&db.collection("myfruits"), Some(&filter))
@@ -108,7 +108,7 @@ async fn main() {
     print_details("Second page (again)", &find_results);
 
     // get the third page
-    options = create_options(2, 0);
+    options = create_options(2, 0, doc! { "name": 1 });
     cursor = find_results.page_info.next_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Next))
         .find(&db.collection("myfruits"), Some(&filter))
@@ -121,7 +121,7 @@ async fn main() {
     print_details("Third page", &find_results);
 
     // get previous page
-    options = create_options(2, 0);
+    options = create_options(2, 0, doc! { "name": 1 });
     cursor = find_results.page_info.start_cursor;
     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Previous))
         .find(&db.collection("myfruits"), Some(&filter))
