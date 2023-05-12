@@ -522,12 +522,3 @@ fn map_from_base64(base64_string: String) -> Result<Document, CursorError> {
     let cursor_doc = bson::from_slice(decoded.as_slice()).unwrap();
     Ok(cursor_doc)
 }
-
-/// Converts an id into a `MongoDb` `ObjectId`
-pub fn get_object_id(id: &str) -> Result<ObjectId, CursorError> {
-    let object_id = match ObjectId::parse_str(id) {
-        Ok(object_id) => object_id,
-        Err(_e) => return Err(CursorError::InvalidId(id.to_string())),
-    };
-    Ok(object_id)
-}
