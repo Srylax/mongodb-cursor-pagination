@@ -161,55 +161,6 @@ use mongodb::{options::FindOptions, Collection};
 use serde::de::DeserializeOwned;
 use std::ops::Neg;
 
-#[cfg(feature = "graphql")]
-#[juniper::object]
-impl PageInfo {
-    fn has_next_page(&self) -> bool {
-        self.has_next_page
-    }
-
-    fn has_previous_page(&self) -> bool {
-        self.has_previous_page
-    }
-
-    fn start_cursor(&self) -> Option<String> {
-        self.start_cursor.to_owned()
-    }
-
-    fn next_cursor(&self) -> Option<String> {
-        self.next_cursor.to_owned()
-    }
-}
-
-#[cfg(feature = "graphql")]
-#[juniper::object]
-impl Edge {
-    fn cursor(&self) -> String {
-        self.cursor.to_owned()
-    }
-}
-// FIX: there's probably a better way to do this...but for now
-#[cfg(feature = "graphql")]
-impl From<&Edge> for Edge {
-    fn from(edge: &Edge) -> Edge {
-        Edge {
-            cursor: edge.cursor.clone(),
-        }
-    }
-}
-
-/// The direction of the list, ie. you are sending a cursor for the next or previous items. Defaults to Next
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CursorDirections {
-    Previous,
-    Next,
-}
-impl Default for CursorDirections {
-    fn default() -> Self {
-        Self::Next
-    }
-}
-
 /// The main entry point for finding documents
 #[derive(Debug)]
 pub struct PaginatedCursor {
