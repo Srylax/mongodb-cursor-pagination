@@ -6,6 +6,14 @@ use thiserror::Error;
 pub enum CursorError {
     #[error("Unable to decode Cursor: {0}")]
     DecodeError(#[from] DecodeError),
+    #[error("Unable to deserialize to bson: {0}")]
+    BsonDeError(#[from] bson::de::Error),
+    #[error("Unable to deserialize to bson: {0}")]
+    BsonSerError(#[from] bson::ser::Error),
     #[error("Unable to parse str to ObjectID: {0}")]
     ParseError(#[from] bson::oid::Error),
+    #[error("Error while retrieving data: {0}")]
+    MongoDBError(#[from] mongodb::error::Error),
+    #[error("Invalid cursor")]
+    InvalidCursor,
 }

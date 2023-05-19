@@ -146,29 +146,20 @@
 //! ```
 
 pub mod error;
+mod model;
 mod options;
 
+pub use crate::model::*;
+
 use crate::options::CursorOptions;
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
-use bson::{doc, oid::ObjectId, Bson, Document};
+use bson::{doc, Bson, Document};
 use error::CursorError;
 use futures_util::stream::StreamExt;
 use log::warn;
-use mongodb::options::{CountOptions, EstimatedDocumentCountOptions};
+use mongodb::options::CountOptions;
 use mongodb::{options::FindOptions, Collection};
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use std::ops::Neg;
-
-/// Provides details about if there are more pages and the cursor to the start of the list and end
-#[derive(Clone, Debug, Deserialize, Serialize, Default)]
-pub struct PageInfo {
-    pub has_next_page: bool,
-    pub has_previous_page: bool,
-    pub start_cursor: Option<String>,
-    pub next_cursor: Option<String>,
-}
 
 #[cfg(feature = "graphql")]
 #[juniper::object]
@@ -190,12 +181,6 @@ impl PageInfo {
     }
 }
 
-/// Edges are the cursors on all of the items in the return
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Edge {
-    pub cursor: String,
-}
-
 #[cfg(feature = "graphql")]
 #[juniper::object]
 impl Edge {
@@ -213,27 +198,23 @@ impl From<&Edge> for Edge {
     }
 }
 
-/// The result of a find method with the items, edges, pagination info, and total count of objects
-#[derive(Debug, Default)]
-pub struct FindResult<T> {
-    pub page_info: PageInfo,
-    pub edges: Vec<Edge>,
-    pub total_count: u64,
-    pub items: Vec<T>,
-}
-
 /// The direction of the list, ie. you are sending a cursor for the next or previous items. Defaults to Next
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CursorDirections {
     Previous,
     Next,
 }
+impl Default for CursorDirections {
+    fn default() -> Self {
+        Self::Next
+    }
+}
 
 /// The main entry point for finding documents
 #[derive(Debug)]
 pub struct PaginatedCursor {
     has_cursor: bool,
-    cursor_doc: Document,
+    cursor: Option<Edge>,
     direction: CursorDirections,
     options: CursorOptions,
 }
@@ -249,36 +230,20 @@ impl PaginatedCursor {
     #[must_use]
     pub fn new(
         options: Option<FindOptions>,
-        cursor: Option<String>,
+        cursor: Option<Edge>,
         direction: Option<CursorDirections>,
     ) -> Self {
         Self {
             // parse base64 for keys
             has_cursor: cursor.is_some(),
-            cursor_doc: cursor.map_or_else(Document::new, |b64| {
-                map_from_base64(b64).expect("Unable to parse cursor")
-            }),
-            direction: direction.unwrap_or(CursorDirections::Next),
+            cursor,
+            direction: direction.unwrap_or_default(),
             options: CursorOptions::from(options.unwrap_or_default()),
         }
     }
 
-    /// Estimates the number of documents in the collection using collection metadata.
-    pub async fn estimated_document_count<T>(
-        &self,
-        collection: &Collection<T>,
-    ) -> Result<u64, CursorError> {
-        let total_count = collection
-            .estimated_document_count(Some(EstimatedDocumentCountOptions::from(
-                self.options.clone(),
-            )))
-            .await
-            .unwrap();
-        Ok(total_count)
-    }
-
     /// Gets the number of documents matching filter.
-    /// Note that using [`PaginatedCursor::estimated_document_count`](#method.estimated_document_count)
+    /// Note that using [`Collection::estimated_document_count`](#method.estimated_document_count)
     /// is recommended instead of this method is most cases.
     pub async fn count_documents<T>(
         &self,
@@ -291,8 +256,7 @@ impl PaginatedCursor {
         let count_query = query.map_or_else(Document::new, Clone::clone);
         let total_count = collection
             .count_documents(count_query, Some(CountOptions::from(count_options)))
-            .await
-            .unwrap();
+            .await?;
         Ok(total_count)
     }
 
@@ -306,16 +270,16 @@ impl PaginatedCursor {
         T: DeserializeOwned + Sync + Send + Unpin + Clone,
     {
         // first count the docs
-        let total_count = self.count_documents(collection, filter).await.unwrap();
+        let total_count = self.count_documents(collection, filter).await?;
 
         // setup defaults
         let mut items: Vec<T> = vec![];
         let mut edges: Vec<Edge> = vec![];
-        let mut has_next_page = false;
-        let mut has_previous_page = false;
         let mut has_skip = false;
-        let mut start_cursor: Option<String> = None;
-        let mut next_cursor: Option<String> = None;
+        let has_next_page;
+        let has_previous_page;
+        let mut start_cursor: Option<Edge> = None;
+        let mut next_cursor: Option<Edge> = None;
 
         // return if we if have no docs
         if total_count == 0 {
@@ -328,7 +292,7 @@ impl PaginatedCursor {
         }
 
         // build the cursor
-        let query_doc = self.get_query(filter.cloned());
+        let query_doc = self.get_query(filter.cloned())?;
         let mut options = self.options.clone();
         let skip_value = options.skip.unwrap_or(0);
         if self.has_cursor || skip_value == 0 {
@@ -351,17 +315,12 @@ impl PaginatedCursor {
                 });
             }
         }
-        let mut cursor = collection
-            .find(query_doc, Some(options.into()))
-            .await
-            .unwrap();
+        let mut cursor = collection.find(query_doc, Some(options.into())).await?;
         while let Some(result) = cursor.next().await {
             match result {
                 Ok(doc) => {
-                    let item = bson::from_bson(Bson::Document(doc.clone())).unwrap();
-                    edges.push(Edge {
-                        cursor: self.create_from_doc(&doc),
-                    });
+                    let item = bson::from_bson(Bson::Document(doc.clone()))?;
+                    edges.push(Edge::new(doc));
                     items.push(item);
                 }
                 Err(error) => {
@@ -375,7 +334,7 @@ impl PaginatedCursor {
             has_previous_page = true;
             has_next_page = has_more;
         } else {
-            has_more = items.len() as i64 > self.options.limit.unwrap().saturating_sub(1);
+            has_more = items.len() as i64 > self.options.limit.unwrap_or(0).saturating_sub(1);
             has_previous_page = (self.has_cursor && self.direction == CursorDirections::Next)
                 || (is_previous_query && has_more);
             has_next_page = (self.direction == CursorDirections::Next && has_more)
@@ -398,46 +357,22 @@ impl PaginatedCursor {
 
         // create the next cursor
         if !items.is_empty() && edges.len() == items.len() {
-            start_cursor = Some(edges[0].cursor.clone());
-            next_cursor = Some(edges[items.len().saturating_sub(1)].cursor.clone());
+            start_cursor = Some(edges[0].clone());
+            next_cursor = Some(edges[items.len().saturating_sub(1)].clone());
         }
 
         let page_info = PageInfo {
             has_next_page,
             has_previous_page,
-            start_cursor,
             next_cursor,
+            start_cursor,
         };
+
         Ok(FindResult {
             page_info,
             edges,
             total_count,
             items,
-        })
-    }
-
-    fn get_value_from_doc(&self, key: &str, doc: Bson) -> Option<(String, Bson)> {
-        let parts: Vec<&str> = key.splitn(2, '.').collect();
-        match doc {
-            Bson::Document(d) => d.get(parts[0]).and_then(|value| match value {
-                Bson::Document(d) => self.get_value_from_doc(parts[1], Bson::Document(d.clone())),
-                _ => Some((parts[0].to_string(), value.clone())),
-            }),
-            _ => Some((parts[0].to_string(), doc)),
-        }
-    }
-
-    fn create_from_doc(&self, doc: &Document) -> String {
-        let mut only_sort_keys = Document::new();
-        self.options.sort.as_ref().map_or_else(String::new, |sort| {
-            for key in sort.keys() {
-                if let Some((_, value)) = self.get_value_from_doc(key, Bson::Document(doc.clone()))
-                {
-                    only_sort_keys.insert(key, value);
-                }
-            }
-            let buf = bson::to_vec(&only_sort_keys).unwrap();
-            STANDARD.encode(buf)
         })
     }
 
@@ -450,24 +385,24 @@ impl PaginatedCursor {
     _id: { $lt: nextId }
     }]
     */
-    fn get_query(&self, query: Option<Document>) -> Document {
+    fn get_query(&self, query: Option<Document>) -> Result<Document, CursorError> {
         // now create the filter
         let mut query_doc = query.unwrap_or_default();
 
         // Don't do anything if no cursor is provided
-        if self.cursor_doc.is_empty() {
-            return query_doc;
-        }
+        let Some(cursor) = &self.cursor else {
+            return Ok(query_doc);
+        };
         let Some(sort) = &self.options.sort else {
-            return query_doc;
+            return Ok(query_doc);
         };
 
         // this is the simplest form, it's just a sort by _id
         if sort.len() <= 1 {
-            let object_id = self.cursor_doc.get("_id").unwrap().clone();
+            let object_id = cursor.get("_id").ok_or(CursorError::InvalidCursor)?.clone();
             let direction = self.get_direction_from_key(sort, "_id");
             query_doc.insert("_id", doc! { direction: object_id });
-            return query_doc;
+            return Ok(query_doc);
         }
 
         let mut queries: Vec<Document> = Vec::new();
@@ -478,7 +413,8 @@ impl PaginatedCursor {
             let mut query = query_doc.clone();
             query.extend(previous_conditions.clone().into_iter()); // Add previous conditions
 
-            let value = self.cursor_doc.get(key).unwrap_or(&Bson::Null);
+            let value = cursor.get(key).unwrap_or(&Bson::Null);
+
             let direction = self.get_direction_from_key(sort, key);
             query.insert(key, doc! { direction: value.clone() });
             previous_conditions.push((key.clone(), value.clone())); // Add self without direction to previous conditions
@@ -491,7 +427,7 @@ impl PaginatedCursor {
         } else {
             queries.pop().unwrap_or_default()
         };
-        query_doc
+        Ok(query_doc)
     }
 
     fn get_direction_from_key(&self, sort: &Document, key: &str) -> &'static str {
@@ -513,12 +449,4 @@ impl PaginatedCursor {
             }
         }
     }
-}
-
-fn map_from_base64(base64_string: String) -> Result<Document, CursorError> {
-    // change from base64
-    let decoded = STANDARD.decode(base64_string)?;
-    // decode from bson
-    let cursor_doc = bson::from_slice(decoded.as_slice()).unwrap();
-    Ok(cursor_doc)
 }

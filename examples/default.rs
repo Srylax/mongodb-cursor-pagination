@@ -1,7 +1,8 @@
 use crate::helper::{create_options, print_details, MyFruit};
 use bson::doc;
 use mongodb::Client;
-use mongodb_cursor_pagination::{CursorDirections, FindResult, PaginatedCursor};
+use mongodb_cursor_pagination::FindResult;
+use mongodb_cursor_pagination::{CursorDirections, PaginatedCursor};
 
 mod helper;
 
