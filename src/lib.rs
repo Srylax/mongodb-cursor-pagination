@@ -23,7 +23,7 @@
 //! The usage is a bit different than the node version. See the examples for more details and a working example.
 //! ```rust
 //! use mongodb::{options::FindOptions, Client};
-//! use mongodb_cursor_pagination::{CursorDirections, FindResult, PaginatedCursor};
+//! use mongodb_cursor_pagination::{FindResult, Pagination};
 //! use bson::doc;
 //! use serde::Deserialize;
 //!
@@ -49,6 +49,7 @@
 //!         .await
 //!         .expect("Failed to initialize client.");
 //!     let db = client.database("mongodb_cursor_pagination");
+//!     let fruits = db.collection::<MyFruit>("myfruits");
 //!   #  db.collection::<MyFruit>("myfruits")
 //!   #      .drop(None)
 //!   #      .await
@@ -73,8 +74,8 @@
 //!             .sort(doc! { "name": 1 })
 //!             .build();
 //!
-//!     let mut find_results: FindResult<MyFruit> = PaginatedCursor::new(Some(options.clone()), None, None)
-//!         .find(&db.collection("myfruits"), None)
+//!     let mut find_results: FindResult<MyFruit> = fruits
+//!         .find_paginated(None, Some(options.clone()), None)
 //!         .await
 //!         .expect("Unable to find data");
 //!   #  assert_eq!(
@@ -84,9 +85,9 @@
 //!     println!("First page: {:?}", find_results);
 //!
 //!     // get the second page
-//!     let mut cursor = find_results.page_info.next_cursor;
-//!     find_results = PaginatedCursor::new(Some(options), cursor, Some(CursorDirections::Next))
-//!         .find(&db.collection("myfruits"), None)
+//!     let mut cursor = find_results.page_info.end_cursor;
+//!     find_results = fruits
+//!         .find_paginated(None, Some(options), cursor)
 //!         .await
 //!         .expect("Unable to find data");
 //!   #  assert_eq!(
@@ -155,249 +156,195 @@ use crate::options::CursorOptions;
 use bson::{doc, Bson, Document};
 use error::CursorError;
 use futures_util::stream::StreamExt;
+use futures_util::TryStreamExt;
 use log::warn;
 use mongodb::options::CountOptions;
 use mongodb::{options::FindOptions, Collection};
 use serde::de::DeserializeOwned;
-use std::ops::Neg;
 
-/// The main entry point for finding documents
-#[derive(Debug)]
-pub struct PaginatedCursor {
-    has_cursor: bool,
-    cursor: Option<Edge>,
-    direction: CursorDirections,
-    options: CursorOptions,
+use async_trait::async_trait;
+
+#[async_trait]
+pub trait Pagination {
+    async fn find_paginated<T>(
+        &self,
+        filter: Option<Document>,
+        options: Option<FindOptions>,
+        cursor: Option<DirectedCursor>,
+    ) -> Result<FindResult<T>, CursorError>
+    where
+        T: DeserializeOwned + Sync + Send + Unpin + Clone;
 }
 
-impl PaginatedCursor {
-    /// Updates or creates all of the find options to help with pagination and returns a `PaginatedCursor` object.
-    ///
-    /// # Arguments
-    /// * `options` - Optional find options that you would like to perform any searches with
-    /// * `cursor` - An optional existing cursor in base64. This would have come from a previous `FindResult<T>`
-    /// * `direction` - Determines whether the cursor supplied is for a previous page or the next page. Defaults to Next
-    ///
-    #[must_use]
-    pub fn new(
+#[async_trait]
+impl<I: Send + Sync> Pagination for Collection<I> {
+    async fn find_paginated<T>(
+        &self,
+        filter: Option<Document>,
         options: Option<FindOptions>,
-        cursor: Option<Edge>,
-        direction: Option<CursorDirections>,
-    ) -> Self {
-        Self {
-            // parse base64 for keys
-            has_cursor: cursor.is_some(),
-            cursor,
-            direction: direction.unwrap_or_default(),
-            options: CursorOptions::from(options.unwrap_or_default()),
-        }
-    }
-
-    /// Gets the number of documents matching filter.
-    /// Note that using [`Collection::estimated_document_count`](#method.estimated_document_count)
-    /// is recommended instead of this method is most cases.
-    pub async fn count_documents<T>(
-        &self,
-        collection: &Collection<T>,
-        query: Option<&Document>,
-    ) -> Result<u64, CursorError> {
-        let mut count_options = self.options.clone();
-        count_options.limit = None;
-        count_options.skip = None;
-        let count_query = query.map_or_else(Document::new, Clone::clone);
-        let total_count = collection
-            .count_documents(count_query, Some(CountOptions::from(count_options)))
-            .await?;
-        Ok(total_count)
-    }
-
-    /// Finds the documents in the `collection` matching `filter`.
-    pub async fn find<T>(
-        &self,
-        collection: &Collection<Document>,
-        filter: Option<&Document>,
+        cursor: Option<DirectedCursor>,
     ) -> Result<FindResult<T>, CursorError>
     where
         T: DeserializeOwned + Sync + Send + Unpin + Clone,
     {
-        // first count the docs
-        let total_count = self.count_documents(collection, filter).await?;
+        let options = CursorOptions::new(options.unwrap_or_default(), cursor.clone());
 
-        // setup defaults
-        let mut items: Vec<T> = vec![];
-        let mut edges: Vec<Edge> = vec![];
-        let mut has_skip = false;
-        let has_next_page;
-        let has_previous_page;
-        let mut start_cursor: Option<Edge> = None;
-        let mut next_cursor: Option<Edge> = None;
+        let filter = filter.unwrap_or_default();
 
-        // return if we if have no docs
-        if total_count == 0 {
-            return Ok(FindResult {
-                page_info: PageInfo::default(),
-                edges: vec![],
-                total_count: 0,
-                items: vec![],
-            });
-        }
+        let query = get_query(filter.clone(), &options, cursor.as_ref())?;
 
-        // build the cursor
-        let query_doc = self.get_query(filter.cloned())?;
-        let mut options = self.options.clone();
-        let skip_value = options.skip.unwrap_or(0);
-        if self.has_cursor || skip_value == 0 {
-            options.skip = None;
-        } else {
-            has_skip = true;
-        }
-        // let has_previous
-        let is_previous_query = self.has_cursor && self.direction == CursorDirections::Previous;
-        // if it's a previous query we need to reverse the sort we were doing
-        if is_previous_query {
-            if let Some(sort) = options.sort.as_mut() {
-                sort.iter_mut().for_each(|(_key, value)| {
-                    if let Bson::Int32(num) = value {
-                        *value = Bson::Int32(num.neg());
-                    }
-                    if let Bson::Int64(num) = value {
-                        *value = Bson::Int64(num.neg());
-                    }
-                });
-            }
-        }
-        let mut cursor = collection.find(query_doc, Some(options.into())).await?;
-        while let Some(result) = cursor.next().await {
-            match result {
-                Ok(doc) => {
-                    let item = bson::from_bson(Bson::Document(doc.clone()))?;
-                    edges.push(Edge::new(doc));
-                    items.push(item);
-                }
-                Err(error) => {
-                    warn!("Error to find doc: {}", error);
-                }
-            }
-        }
-        let has_more: bool;
-        if has_skip {
-            has_more = (items.len() as u64).saturating_add(skip_value) < total_count;
-            has_previous_page = true;
-            has_next_page = has_more;
-        } else {
-            has_more = items.len() as i64 > self.options.limit.unwrap_or(0).saturating_sub(1);
-            has_previous_page = (self.has_cursor && self.direction == CursorDirections::Next)
-                || (is_previous_query && has_more);
-            has_next_page = (self.direction == CursorDirections::Next && has_more)
-                || (is_previous_query && self.has_cursor);
-        }
+        let mut edges = self
+            .clone_with_type::<Document>()
+            .find(query.clone(), Some(options.clone().into()))
+            .await?
+            .map_ok(Edge::from)
+            .try_collect::<Vec<Edge>>()
+            .await?;
 
-        // reorder if we are going backwards
-        if is_previous_query {
-            items.reverse();
+        if matches!(cursor, Some(DirectedCursor::Backwards(_))) {
             edges.reverse();
         }
-        // remove the extra item to check if we have more
-        if has_more && !is_previous_query {
-            items.pop();
-            edges.pop();
-        } else if has_more {
-            items.remove(0);
-            edges.remove(0);
-        }
 
-        // create the next cursor
-        if !items.is_empty() && edges.len() == items.len() {
-            start_cursor = Some(edges[0].clone());
-            next_cursor = Some(edges[items.len().saturating_sub(1)].clone());
-        }
+        let items = edges
+            .clone()
+            .into_iter()
+            .map(|edge| bson::from_bson(Bson::Document(edge.into_inner())).unwrap())
+            .collect();
+
+        let end_cursor = edges.last().cloned().map(DirectedCursor::Forward);
+        let start_cursor = edges.first().cloned().map(DirectedCursor::Backwards);
+
+        let has_next_page = has_page(
+            &self.clone_with_type(),
+            filter.clone(),
+            options.clone(),
+            end_cursor.as_ref(),
+        )
+        .await?;
+
+        let has_previous_page = has_page(
+            &self.clone_with_type(),
+            filter.clone(),
+            options.clone(),
+            start_cursor.as_ref(),
+        )
+        .await?;
 
         let page_info = PageInfo {
-            has_next_page,
             has_previous_page,
-            next_cursor,
+            has_next_page,
             start_cursor,
+            end_cursor,
         };
 
         Ok(FindResult {
             page_info,
             edges,
-            total_count,
+            total_count: count_documents(options.clone().into(), self, Some(&filter)).await?,
             items,
         })
     }
+}
 
-    /*
-    $or: [{
-        launchDate: { $lt: nextLaunchDate }
-    }, {
-        // If the launchDate is an exact match, we need a tiebreaker, so we use the _id field from the cursor.
-        launchDate: nextLaunchDate,
-    _id: { $lt: nextId }
-    }]
-    */
-    fn get_query(&self, query: Option<Document>) -> Result<Document, CursorError> {
-        // now create the filter
-        let mut query_doc = query.unwrap_or_default();
+/// Gets the number of documents matching filter.
+/// Note that using [`Collection::estimated_document_count`](#method.estimated_document_count)
+/// is recommended instead of this method is most cases.
+pub async fn count_documents<T>(
+    mut options: CountOptions,
+    collection: &Collection<T>,
+    filter: Option<&Document>,
+) -> Result<u64, CursorError> {
+    options.limit = None;
+    options.skip = None;
+    let count_query = filter.map_or_else(Document::new, Clone::clone);
+    Ok(collection
+        .count_documents(count_query, Some(CountOptions::from(options)))
+        .await?)
+}
 
-        // Don't do anything if no cursor is provided
-        let Some(cursor) = &self.cursor else {
-            return Ok(query_doc);
-        };
-        let Some(sort) = &self.options.sort else {
-            return Ok(query_doc);
-        };
+/*
+$or: [{
+    launchDate: { $lt: nextLaunchDate }
+}, {
+    // If the launchDate is an exact match, we need a tiebreaker, so we use the _id field from the cursor.
+    launchDate: nextLaunchDate,
+_id: { $lt: nextId }
+}]
+*/
+fn get_query(
+    mut filter: Document,
+    options: &CursorOptions,
+    cursor: Option<&DirectedCursor>,
+) -> Result<Document, CursorError> {
+    let Some(cursor) = cursor else {
+        return Ok(filter);
+    };
 
-        // this is the simplest form, it's just a sort by _id
-        if sort.len() <= 1 {
-            let object_id = cursor.get("_id").ok_or(CursorError::InvalidCursor)?.clone();
-            let direction = self.get_direction_from_key(sort, "_id");
-            query_doc.insert("_id", doc! { direction: object_id });
-            return Ok(query_doc);
-        }
+    let Some(sort) = options.sort.clone() else {
+            return Ok(filter);
+    };
 
-        let mut queries: Vec<Document> = Vec::new();
-        let mut previous_conditions: Vec<(String, Bson)> = Vec::new();
-
-        // Add each sort condition with it's direction and all previous condition with fixed values
-        for key in sort.keys() {
-            let mut query = query_doc.clone();
-            query.extend(previous_conditions.clone().into_iter()); // Add previous conditions
-
-            let value = cursor.get(key).unwrap_or(&Bson::Null);
-
-            let direction = self.get_direction_from_key(sort, key);
-            query.insert(key, doc! { direction: value.clone() });
-            previous_conditions.push((key.clone(), value.clone())); // Add self without direction to previous conditions
-
-            queries.push(query);
-        }
-
-        query_doc = if queries.len() > 1 {
-            doc! { "$or": queries.iter().as_ref() }
+    // this is the simplest form, it's just a sort by _id
+    if sort.len() <= 1 {
+        let object_id = cursor.get("_id").ok_or(CursorError::InvalidCursor)?.clone();
+        let direction = if sort.get_i32("_id")? >= 0 {
+            "$gt"
         } else {
-            queries.pop().unwrap_or_default()
+            "$lt"
         };
-        Ok(query_doc)
+        filter.insert("_id", doc! { direction: object_id });
+        return Ok(filter);
     }
 
-    fn get_direction_from_key(&self, sort: &Document, key: &str) -> &'static str {
-        let value = sort.get(key).and_then(Bson::as_i32).unwrap_or(0);
-        match self.direction {
-            CursorDirections::Next => {
-                if value >= 0 {
-                    "$gt"
-                } else {
-                    "$lt"
-                }
-            }
-            CursorDirections::Previous => {
-                if value >= 0 {
-                    "$lt"
-                } else {
-                    "$gt"
-                }
-            }
-        }
+    let mut queries: Vec<Document> = Vec::new();
+    let mut previous_conditions: Vec<(String, Bson)> = Vec::new();
+
+    // Add each sort condition with it's direction and all previous condition with fixed values
+    for key in sort.keys() {
+        let mut query = filter.clone();
+        query.extend(previous_conditions.clone().into_iter()); // Add previous conditions
+
+        let value = cursor.get(key).unwrap_or(&Bson::Null);
+
+        let direction = if sort.get_i32(key)? >= 0 {
+            "$gt"
+        } else {
+            "$lt"
+        };
+
+        query.insert(key, doc! { direction: value.clone() });
+        previous_conditions.push((key.clone(), value.clone())); // Add self without direction to previous conditions
+
+        queries.push(query);
     }
+
+    filter = if queries.len() > 1 {
+        doc! { "$or": queries.iter().as_ref() }
+    } else {
+        queries.pop().unwrap_or_default()
+    };
+    Ok(filter)
+}
+
+async fn has_page(
+    collection: &Collection<Document>,
+    filter: Document,
+    mut options: CursorOptions,
+    cursor: Option<&DirectedCursor>,
+) -> Result<bool, CursorError> {
+    let Some(cursor) = cursor else {
+        return Ok(false);
+    };
+
+    options.set_cursor(cursor.clone());
+    options.skip = None;
+    let filter = get_query(filter, &options, Some(cursor))?;
+
+    Ok(collection
+        .find(Some(filter), Some(options.into()))
+        .await?
+        .next()
+        .await
+        .transpose()?
+        .is_some())
 }

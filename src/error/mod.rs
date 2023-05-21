@@ -10,6 +10,8 @@ pub enum CursorError {
     BsonDeError(#[from] bson::de::Error),
     #[error("Unable to deserialize to bson: {0}")]
     BsonSerError(#[from] bson::ser::Error),
+    #[error("Error while accessing Value {0}")]
+    BsonValueAccessError(#[from] bson::document::ValueAccessError),
     #[error("Unable to parse str to ObjectID: {0}")]
     ParseError(#[from] bson::oid::Error),
     #[error("Error while retrieving data: {0}")]

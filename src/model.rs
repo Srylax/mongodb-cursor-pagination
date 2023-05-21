@@ -3,12 +3,12 @@ use std::ops::{Deref, DerefMut};
 use bson::Document;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Edge(Document);
 
 impl Edge {
-    pub(crate) fn new(doc: Document) -> Self {
-        Self(doc)
+    pub fn into_inner(self) -> Document {
+        self.0
     }
 }
 
@@ -17,6 +17,12 @@ impl Edge {
 impl Edge {
     fn cursor(&self) -> String {
         self.cursor.to_owned()
+    }
+}
+
+impl From<Document> for Edge {
+    fn from(value: Document) -> Self {
+        Self(value)
     }
 }
 
@@ -38,10 +44,10 @@ impl DerefMut for Edge {
 /// Note: has_xxx means if the next page has items, not if there is a next cursor
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct PageInfo {
-    pub has_next_page: bool,
     pub has_previous_page: bool,
-    pub next_cursor: Option<Edge>,
-    pub start_cursor: Option<Edge>,
+    pub has_next_page: bool,
+    pub start_cursor: Option<DirectedCursor>,
+    pub end_cursor: Option<DirectedCursor>,
 }
 
 #[cfg(feature = "graphql")]
@@ -59,7 +65,7 @@ impl PageInfo {
         self.start_cursor.to_owned()
     }
 
-    fn next_cursor(&self) -> Option<String> {
+    fn end_cursor(&self) -> Option<String> {
         self.next_cursor.to_owned()
     }
 }
@@ -73,14 +79,28 @@ pub struct FindResult<T> {
     pub items: Vec<T>,
 }
 
-/// The direction of the list, ie. you are sending a cursor for the next or previous items. Defaults to Next
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CursorDirections {
-    Previous,
-    Next,
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum DirectedCursor {
+    Backwards(Edge),
+    Forward(Edge),
 }
-impl Default for CursorDirections {
-    fn default() -> Self {
-        Self::Next
+
+impl Deref for DirectedCursor {
+    type Target = Edge;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Backwards(edge) => edge,
+            Self::Forward(edge) => edge,
+        }
+    }
+}
+
+impl DirectedCursor {
+    pub fn reverse(self) -> Self {
+        match self {
+            Self::Backwards(edge) => Self::Forward(edge),
+            Self::Forward(edge) => Self::Backwards(edge),
+        }
     }
 }
