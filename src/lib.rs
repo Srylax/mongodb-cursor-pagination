@@ -148,11 +148,11 @@
 
 pub mod error;
 mod model;
-mod options;
+mod option;
 
 pub use crate::model::*;
 
-use crate::options::CursorOptions;
+use crate::option::CursorOptions;
 use bson::{doc, Bson, Document};
 use error::CursorError;
 use futures_util::stream::StreamExt;
