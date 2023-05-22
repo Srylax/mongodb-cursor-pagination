@@ -1,10 +1,10 @@
 use bson::{doc, Document};
 use mongodb::options::FindOptions;
 use mongodb_cursor_pagination::FindResult;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct MyFruit {
     name: String,
     how_many: i32,
@@ -30,12 +30,12 @@ pub fn create_options(limit: i64, skip: u64, sort: Document) -> FindOptions {
 
 pub fn print_details<T: Debug>(name: &str, find_results: &FindResult<T>) {
     println!(
-        "{}:\nitems: {:?}\ntotal: {}\nnext: {:?}\nprevious: {:?}\nhas_previous: {}\nhas_next: {}",
+        "{}:\nitems: {:?}\ntotal: {}\nstart: {:?}\nend: {:?}\nhas_previous: {}\nhas_next: {}",
         name,
         find_results.items,
         find_results.total_count,
-        find_results.page_info.next_cursor,
         find_results.page_info.start_cursor,
+        find_results.page_info.end_cursor,
         find_results.page_info.has_previous_page,
         find_results.page_info.has_next_page,
     );

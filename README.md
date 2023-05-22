@@ -17,7 +17,7 @@ the skip parameter.)
 It's based on the [node.js module](https://github.com/mixmaxhq/mongo-cursor-pagination) but written in Rust.
 You can read more about the concept on their [blog post](https://engineering.mixmax.com/blog/api-paging-built-the-right-way/). 
 
-So far it only supports count and find. Search and aggregation will come when needed. 
+So far it only supports find. Search and aggregation will come when needed. 
 
 [//]: # (badges)
 [crate-image]: https://buildstats.info/crate/mongodb-cursor-pagination
