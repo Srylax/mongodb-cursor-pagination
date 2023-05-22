@@ -2,7 +2,7 @@ use crate::helper::{create_options, print_details, MyFruit};
 use bson::doc;
 use bson::{Bson, Regex};
 use mongodb::Client;
-use mongodb_cursor_pagination::{DirectedCursor, FindResult, Pagination};
+use mongodb_cursor_pagination::{FindResult, Pagination};
 
 mod helper;
 
