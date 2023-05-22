@@ -10,10 +10,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::option::CursorOptions;
 
+/// Represents a Cursor to an Item with no special direction.
+/// To Debug the contents, use `Debug`
+/// When serializing or converting to String, the [`Edge`] gets encoded as url-safe Base64 String.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Edge(Document);
 
 impl Edge {
+    /// Creates a new [`Edge`] using a value Document and the sorting keys.
+    /// Only retains the values of the keys specified in the sort options to optimize storage.
+    ///
+    /// # Arguments
+    /// * `document`: The Item to which the Edge will point to
+    /// * `options`: Used to extract the sorting keys
     pub fn new(document: Document, options: &CursorOptions) -> Self {
         let mut cursor = Document::new();
         options
@@ -99,12 +108,20 @@ impl DerefMut for Edge {
 }
 
 /// Contains information about the current Page
+/// The cursor have the respecting direction to be used as is in an subsequent find:
+/// start_cursor: `Backwards`
+/// end_cursor: `Forward`
+///
 /// Note: has_xxx means if the next page has items, not if there is a next cursor
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct PageInfo {
+    /// True if there is a previous page which contains items
     pub has_previous_page: bool,
+    /// True if there is a next page which contains items
     pub has_next_page: bool,
+    /// Cursor to the first item of the page. Is set even when there is no previous page.
     pub start_cursor: Option<DirectedCursor>,
+    /// Cursor to the last item of the page. Is set even when there is no next page.
     pub end_cursor: Option<DirectedCursor>,
 }
 
@@ -131,25 +148,36 @@ impl PageInfo {
 /// The result of a find method with the items, edges, pagination info, and total count of objects
 #[derive(Debug, Default)]
 pub struct FindResult<T> {
+    /// Current Page
     pub page_info: PageInfo,
+    /// Edges to all items in the current Page, including start & end-cursor
     pub edges: Vec<Edge>,
+    /// Total count of items in the whole collection
     pub total_count: u64,
+    /// All items in the current Page
     pub items: Vec<T>,
 }
 
+/// Cursor to an item with direction information.
+/// Serializing pretains the direction Information.
+/// To send only the Cursor use `to_string` which drops the direction information
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum DirectedCursor {
+    /// Use to invert the search e.g. go back a page
     Backwards(Edge),
+    /// Normal direction to search
     Forward(Edge),
 }
 
 impl DirectedCursor {
+    /// Reverses the direction of Cursor.
     pub fn reverse(self) -> Self {
         match self {
             Self::Backwards(edge) => Self::Forward(edge),
             Self::Forward(edge) => Self::Backwards(edge),
         }
     }
+    /// Returns a reference to the inner of this [`DirectedCursor`].
     pub fn inner(&self) -> &Edge {
         match self {
             Self::Backwards(edge) => edge,
@@ -157,6 +185,7 @@ impl DirectedCursor {
         }
     }
 
+    /// Removes the direction information and returns an Edge
     pub fn into_inner(self) -> Edge {
         match self {
             Self::Backwards(edge) => edge,

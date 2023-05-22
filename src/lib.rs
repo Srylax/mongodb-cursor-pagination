@@ -146,10 +146,11 @@
 //! }
 //! ```
 
-pub mod error;
+mod error;
 mod model;
 mod option;
 
+pub use crate::error::*;
 pub use crate::model::*;
 
 use crate::option::CursorOptions;
@@ -165,7 +166,14 @@ use serde::de::DeserializeOwned;
 use async_trait::async_trait;
 
 #[async_trait]
+/// Used to paginate through a collection.
 pub trait Pagination {
+    /// Finds the items in the collection matching `filter` based on the `cursor`.
+    ///
+    /// # Arguments
+    /// * `filter`: Optional filter to restrict the result set of the query.
+    /// * `options`: Optional find options that you would like to perform any searches with
+    /// * `cursor`: An optional existing cursor in base64. This would have come from a previous `FindResult<T>`
     async fn find_paginated<T>(
         &self,
         filter: Option<Document>,
@@ -173,7 +181,7 @@ pub trait Pagination {
         cursor: Option<DirectedCursor>,
     ) -> Result<FindResult<T>, CursorError>
     where
-        T: DeserializeOwned + Sync + Send + Unpin + Clone;
+        T: DeserializeOwned + Send;
 }
 
 #[async_trait]
@@ -185,7 +193,7 @@ impl<I: Send + Sync> Pagination for Collection<I> {
         cursor: Option<DirectedCursor>,
     ) -> Result<FindResult<T>, CursorError>
     where
-        T: DeserializeOwned + Sync + Send + Unpin + Clone,
+        T: DeserializeOwned + Send,
     {
         let options = CursorOptions::new(options.unwrap_or_default(), cursor.clone());
 
@@ -251,10 +259,7 @@ impl<I: Send + Sync> Pagination for Collection<I> {
     }
 }
 
-/// Gets the number of documents matching filter.
-/// Note that using [`Collection::estimated_document_count`](#method.estimated_document_count)
-/// is recommended instead of this method is most cases.
-pub async fn count_documents<T>(
+async fn count_documents<T>(
     mut options: CountOptions,
     collection: &Collection<T>,
     filter: Option<&Document>,
@@ -263,7 +268,7 @@ pub async fn count_documents<T>(
     options.skip = None;
     let count_query = filter.map_or_else(Document::new, Clone::clone);
     Ok(collection
-        .count_documents(count_query, Some(CountOptions::from(options)))
+        .count_documents(count_query, Some(options))
         .await?)
 }
 
