@@ -193,23 +193,28 @@ impl<I: Send + Sync> Pagination for Collection<I> {
 
         let query = get_query(filter.clone(), &options, cursor.as_ref())?;
 
-        let mut edges = self
+        let mut documents = self
             .clone_with_type::<Document>()
             .find(query.clone(), Some(options.clone().into()))
             .await?
-            .map_ok(Edge::from)
-            .try_collect::<Vec<Edge>>()
+            .try_collect::<Vec<Document>>()
             .await?;
 
         if matches!(cursor, Some(DirectedCursor::Backwards(_))) {
-            edges.reverse();
+            documents.reverse();
         }
 
-        let items = edges
+        let items = documents
             .clone()
             .into_iter()
-            .map(|edge| bson::from_bson(Bson::Document(edge.into_inner())).unwrap())
-            .collect();
+            .map(|doc| bson::from_bson(Bson::Document(doc)))
+            .collect::<Result<Vec<T>, _>>()?;
+
+        let edges = documents
+            .clone()
+            .into_iter()
+            .map(|doc| Edge::new(doc, &options))
+            .collect::<Vec<Edge>>();
 
         let end_cursor = edges.last().cloned().map(DirectedCursor::Forward);
         let start_cursor = edges.first().cloned().map(DirectedCursor::Backwards);
@@ -286,7 +291,11 @@ fn get_query(
 
     // this is the simplest form, it's just a sort by _id
     if sort.len() <= 1 {
-        let object_id = cursor.get("_id").ok_or(CursorError::InvalidCursor)?.clone();
+        let object_id = cursor
+            .inner()
+            .get("_id")
+            .ok_or(CursorError::InvalidCursor)?
+            .clone();
         let direction = if sort.get_i32("_id")? >= 0 {
             "$gt"
         } else {
@@ -304,7 +313,7 @@ fn get_query(
         let mut query = filter.clone();
         query.extend(previous_conditions.clone().into_iter()); // Add previous conditions
 
-        let value = cursor.get(key).unwrap_or(&Bson::Null);
+        let value = cursor.inner().get(key).unwrap_or(&Bson::Null);
 
         let direction = if sort.get_i32(key)? >= 0 {
             "$gt"

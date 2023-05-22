@@ -2,7 +2,7 @@ use bson::{doc, Document};
 use mongodb::options::FindOptions;
 use mongodb_cursor_pagination::FindResult;
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct MyFruit {

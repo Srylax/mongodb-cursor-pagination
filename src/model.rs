@@ -1,14 +1,78 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    fmt::Display,
+    ops::{Deref, DerefMut},
+};
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use bson::Document;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+use crate::option::CursorOptions;
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Edge(Document);
 
 impl Edge {
-    pub fn into_inner(self) -> Document {
-        self.0
+    pub fn new(document: Document, options: &CursorOptions) -> Self {
+        let mut cursor = Document::new();
+        options
+            .sort
+            .clone()
+            .unwrap_or_default()
+            .keys()
+            .filter_map(|key| document.get(key).map(|value| (key, value)))
+            .for_each(|(key, value)| {
+                cursor.insert(key, value);
+            });
+        Self(cursor)
+    }
+}
+
+impl Display for Edge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            &URL_SAFE_NO_PAD.encode(bson::to_vec(&self.0).map_err(serde::ser::Error::custom)?)
+        )
+    }
+}
+
+impl Serialize for Edge {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(
+            &URL_SAFE_NO_PAD.encode(bson::to_vec(&self.0).map_err(serde::ser::Error::custom)?),
+        )
+    }
+}
+
+impl<'de> Deserialize<'de> for Edge {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Vis;
+        impl serde::de::Visitor<'_> for Vis {
+            type Value = Edge;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a base64 string")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                let doc = URL_SAFE_NO_PAD
+                    .decode(v)
+                    .map_err(serde::de::Error::custom)?;
+                Ok(Edge(
+                    bson::from_slice(doc.as_slice()).map_err(serde::de::Error::custom)?,
+                ))
+            }
+        }
+        deserializer.deserialize_str(Vis)
     }
 }
 
@@ -17,12 +81,6 @@ impl Edge {
 impl Edge {
     fn cursor(&self) -> String {
         self.cursor.to_owned()
-    }
-}
-
-impl From<Document> for Edge {
-    fn from(value: Document) -> Self {
-        Self(value)
     }
 }
 
@@ -85,10 +143,21 @@ pub enum DirectedCursor {
     Forward(Edge),
 }
 
-impl Deref for DirectedCursor {
-    type Target = Edge;
+impl DirectedCursor {
+    pub fn reverse(self) -> Self {
+        match self {
+            Self::Backwards(edge) => Self::Forward(edge),
+            Self::Forward(edge) => Self::Backwards(edge),
+        }
+    }
+    pub fn inner(&self) -> &Edge {
+        match self {
+            Self::Backwards(edge) => edge,
+            Self::Forward(edge) => edge,
+        }
+    }
 
-    fn deref(&self) -> &Self::Target {
+    pub fn into_inner(self) -> Edge {
         match self {
             Self::Backwards(edge) => edge,
             Self::Forward(edge) => edge,
@@ -96,11 +165,8 @@ impl Deref for DirectedCursor {
     }
 }
 
-impl DirectedCursor {
-    pub fn reverse(self) -> Self {
-        match self {
-            Self::Backwards(edge) => Self::Forward(edge),
-            Self::Forward(edge) => Self::Backwards(edge),
-        }
+impl Display for DirectedCursor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.inner())
     }
 }
