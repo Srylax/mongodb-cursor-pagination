@@ -16,16 +16,16 @@ default = []
 graphql = ["juniper"]
 
 [dependencies]
-base64 = "0.21.0"
-bson = "2.5.0"
-log = "0.4.17"
-mongodb = "2.3.1"
+base64 = "0.21"
+bson = "2.8"
+log = "0.4"
+mongodb = "2.8"
 serde = "1.0"
-juniper = { version = "0.15.11", optional = true }
-futures = "0.3.26"
-futures-util = "0.3.26"
-thiserror = "1.0.40"
-async-trait = "0.1.68"
+juniper = { version = "0.15", optional = true }
+futures = "0.3"
+futures-util = "0.3"
+thiserror = "1.0"
+async-trait = "0.1"
 
 [dev-dependencies]
-tokio = { version = "1.25.0", features = ["full"]}
+tokio = { version = "1.35", features = ["full"]}

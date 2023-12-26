@@ -76,7 +76,7 @@ impl From<CursorOptions> for CountOptions {
         Self::builder()
             .collation(value.collation.clone())
             .hint(value.hint.clone())
-            .limit(value.limit.map(|i| i as u64))
+            .limit(value.limit.map(i64::unsigned_abs))
             .max_time(value.max_time)
             .skip(value.skip)
             .build()
