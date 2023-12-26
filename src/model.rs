@@ -23,7 +23,8 @@ impl Edge {
     /// # Arguments
     /// * `document`: The Item to which the Edge will point to
     /// * `options`: Used to extract the sorting keys
-    pub fn new(document: Document, options: &CursorOptions) -> Self {
+    #[must_use]
+    pub fn new(document: &Document, options: &CursorOptions) -> Self {
         let mut cursor = Document::new();
         options
             .sort
@@ -109,10 +110,10 @@ impl DerefMut for Edge {
 
 /// Contains information about the current Page
 /// The cursor have the respecting direction to be used as is in an subsequent find:
-/// start_cursor: `Backwards`
-/// end_cursor: `Forward`
+/// `start_cursor`: `Backwards`
+/// `end_cursor`: `Forward`
 ///
-/// Note: has_xxx means if the next page has items, not if there is a next cursor
+/// Note: `has_xxx` means if the next page has items, not if there is a next cursor
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct PageInfo {
     /// True if there is a previous page which contains items
@@ -171,6 +172,7 @@ pub enum DirectedCursor {
 
 impl DirectedCursor {
     /// Reverses the direction of Cursor.
+    #[must_use]
     pub fn reverse(self) -> Self {
         match self {
             Self::Backwards(edge) => Self::Forward(edge),
@@ -178,18 +180,18 @@ impl DirectedCursor {
         }
     }
     /// Returns a reference to the inner of this [`DirectedCursor`].
-    pub fn inner(&self) -> &Edge {
+    #[must_use]
+    pub const fn inner(&self) -> &Edge {
         match self {
-            Self::Backwards(edge) => edge,
-            Self::Forward(edge) => edge,
+            Self::Forward(edge) | Self::Backwards(edge) => edge,
         }
     }
 
     /// Removes the direction information and returns an Edge
+    #[must_use]
     pub fn into_inner(self) -> Edge {
         match self {
-            Self::Backwards(edge) => edge,
-            Self::Forward(edge) => edge,
+            Self::Forward(edge) | Self::Backwards(edge) => edge,
         }
     }
 }

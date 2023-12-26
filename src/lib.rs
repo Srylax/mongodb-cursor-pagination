@@ -8,7 +8,7 @@
     clippy::cast_sign_loss,
     clippy::checked_conversions,
     clippy::implicit_saturating_sub,
-    clippy::integer_arithmetic,
+    clippy::arithmetic_side_effects,
     clippy::mod_module_files,
     clippy::panic,
     clippy::panic_in_result_fn,
@@ -221,7 +221,7 @@ impl<I: Send + Sync> Pagination for Collection<I> {
         let edges = documents
             .clone()
             .into_iter()
-            .map(|doc| Edge::new(doc, &options))
+            .map(|doc| Edge::new(&doc, &options))
             .collect::<Vec<Edge>>();
 
         let end_cursor = edges.last().cloned().map(DirectedCursor::Forward);
@@ -259,7 +259,7 @@ impl<I: Send + Sync> Pagination for Collection<I> {
     }
 }
 
-async fn count_documents<T>(
+async fn count_documents<T: Sync>(
     mut options: CountOptions,
     collection: &Collection<T>,
     filter: Option<&Document>,
@@ -291,7 +291,7 @@ fn get_query(
     };
 
     let Some(sort) = options.sort.clone() else {
-            return Ok(filter);
+        return Ok(filter);
     };
 
     // this is the simplest form, it's just a sort by _id
