@@ -87,10 +87,10 @@ impl<'de> Deserialize<'de> for Edge {
 }
 
 #[cfg(feature = "graphql")]
-#[juniper::object]
+#[juniper::graphql_object]
 impl Edge {
     fn cursor(&self) -> String {
-        self.cursor.to_owned()
+        self.0.to_owned().to_string()
     }
 }
 
@@ -127,7 +127,7 @@ pub struct PageInfo {
 }
 
 #[cfg(feature = "graphql")]
-#[juniper::object]
+#[juniper::graphql_object]
 impl PageInfo {
     fn has_next_page(&self) -> bool {
         self.has_next_page
@@ -138,11 +138,13 @@ impl PageInfo {
     }
 
     fn start_cursor(&self) -> Option<String> {
-        self.start_cursor.to_owned()
+        self.start_cursor
+            .to_owned()
+            .map(|cursor| cursor.to_string())
     }
 
     fn end_cursor(&self) -> Option<String> {
-        self.next_cursor.to_owned()
+        self.end_cursor.to_owned().map(|cursor| cursor.to_string())
     }
 }
 
