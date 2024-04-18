@@ -155,7 +155,6 @@ pub use crate::model::*;
 
 use crate::option::CursorOptions;
 use bson::{doc, Bson, Document};
-use error::CursorError;
 use futures_util::stream::StreamExt;
 use futures_util::TryStreamExt;
 use log::warn;
