@@ -1,23 +1,4 @@
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)]
-#![warn(
-    clippy::cast_lossless,
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss,
-    clippy::checked_conversions,
-    clippy::implicit_saturating_sub,
-    clippy::arithmetic_side_effects,
-    clippy::mod_module_files,
-    clippy::panic,
-    clippy::panic_in_result_fn,
-    clippy::unwrap_used,
-    missing_docs,
-    rust_2018_idioms,
-    unused_lifetimes,
-    unused_qualifications
-)]
 
 //! ### Usage:
 //! The usage is a bit different than the node version. See the examples for more details and a working example.
@@ -149,16 +130,13 @@
 mod error;
 mod model;
 mod option;
-
-pub use crate::error::*;
-pub use crate::model::*;
+pub use model::*;
 
 use crate::option::CursorOptions;
 use bson::{doc, Bson, Document};
 use error::CursorError;
 use futures_util::stream::StreamExt;
 use futures_util::TryStreamExt;
-use log::warn;
 use mongodb::options::CountOptions;
 use mongodb::{options::FindOptions, Collection};
 use serde::de::DeserializeOwned;
@@ -301,7 +279,7 @@ fn get_query(
             .get("_id")
             .ok_or(CursorError::InvalidCursor)?
             .clone();
-        let direction = if sort.get_i32("_id")? >= 0 {
+        let direction = if sort.get_i32("_id")? >= 0_i32 {
             "$gt"
         } else {
             "$lt"
@@ -320,7 +298,7 @@ fn get_query(
 
         let value = cursor.inner().get(key).unwrap_or(&Bson::Null);
 
-        let direction = if sort.get_i32(key)? >= 0 {
+        let direction = if sort.get_i32(key)? >= 0_i32 {
             "$gt"
         } else {
             "$lt"

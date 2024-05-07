@@ -1,3 +1,4 @@
+use std::fmt;
 use std::{
     fmt::Display,
     ops::{Deref, DerefMut},
@@ -6,7 +7,8 @@ use std::{
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use bson::Document;
-use serde::{Deserialize, Serialize};
+use serde::de::{self, Visitor};
+use serde::{ser, Deserialize, Serialize};
 
 use crate::option::CursorOptions;
 
@@ -40,11 +42,11 @@ impl Edge {
 }
 
 impl Display for Edge {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
-            f,
+            fmt,
             "{}",
-            &URL_SAFE_NO_PAD.encode(bson::to_vec(&self.0).map_err(serde::ser::Error::custom)?)
+            &URL_SAFE_NO_PAD.encode(bson::to_vec(&self.0).map_err(ser::Error::custom)?)
         )
     }
 }
@@ -55,7 +57,7 @@ impl Serialize for Edge {
         S: serde::Serializer,
     {
         serializer.serialize_str(
-            &URL_SAFE_NO_PAD.encode(bson::to_vec(&self.0).map_err(serde::ser::Error::custom)?),
+            &URL_SAFE_NO_PAD.encode(bson::to_vec(&self.0).map_err(ser::Error::custom)?),
         )
     }
 }
@@ -66,19 +68,17 @@ impl<'de> Deserialize<'de> for Edge {
         D: serde::Deserializer<'de>,
     {
         struct Vis;
-        impl serde::de::Visitor<'_> for Vis {
+        impl Visitor<'_> for Vis {
             type Value = Edge;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a base64 string")
             }
 
-            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
-                let doc = URL_SAFE_NO_PAD
-                    .decode(v)
-                    .map_err(serde::de::Error::custom)?;
+            fn visit_str<E: de::Error>(self, str: &str) -> Result<Self::Value, E> {
+                let doc = URL_SAFE_NO_PAD.decode(str).map_err(de::Error::custom)?;
                 Ok(Edge(
-                    bson::from_slice(doc.as_slice()).map_err(serde::de::Error::custom)?,
+                    bson::from_slice(doc.as_slice()).map_err(de::Error::custom)?,
                 ))
             }
         }
@@ -115,6 +115,7 @@ impl DerefMut for Edge {
 ///
 /// Note: `has_xxx` means if the next page has items, not if there is a next cursor
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[non_exhaustive]
 pub struct PageInfo {
     /// True if there is a previous page which contains items
     pub has_previous_page: bool,
@@ -148,6 +149,7 @@ impl PageInfo {
 
 /// The result of a find method with the items, edges, pagination info, and total count of objects
 #[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct FindResult<T> {
     /// Current Page
     pub page_info: PageInfo,
@@ -163,6 +165,7 @@ pub struct FindResult<T> {
 /// Serializing pretains the direction Information.
 /// To send only the Cursor use `to_string` which drops the direction information
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::exhaustive_enums)] // If there would ever be more Variants we would want the Code to break
 pub enum DirectedCursor {
     /// Use to invert the search e.g. go back a page
     Backwards(Edge),
@@ -197,7 +200,7 @@ impl DirectedCursor {
 }
 
 impl Display for DirectedCursor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.inner())
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(fmt, "{}", self.inner())
     }
 }

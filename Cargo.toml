@@ -5,6 +5,7 @@ authors = ["Kylian Lichtensteiger <e38c1a93@srylax.dev"]
 edition = "2021"
 license = "MIT"
 keywords = ["mongo", "mongodb", "database", "cursor", "pagination"]
+categories = ["database", "algorithms"]
 readme = "README.md"
 repository = "https://github.com/Srylax/mongodb-cursor-pagination"
 description = """
@@ -16,16 +17,53 @@ default = []
 graphql = ["juniper"]
 
 [dependencies]
-base64 = "0.21"
+base64 = "0.22"
 bson = "2.8"
 log = "0.4"
 mongodb = "2.8"
 serde = "1.0"
-juniper = { version = "0.15", optional = true }
+juniper = { version = "0.16", optional = true }
 futures = "0.3"
 futures-util = "0.3"
 thiserror = "1.0"
 async-trait = "0.1"
 
 [dev-dependencies]
-tokio = { version = "1.35", features = ["full"]}
+tokio = { version = "1.35", features = ["full"] }
+
+
+[lints.rust]
+rust_2018_idioms = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+similar_names = { level = "allow", priority = 1 }
+missing_errors_doc = { level = "allow", priority = 1 }
+style = "warn"
+perf = "warn"
+complexity = "warn"
+suspicious = "warn"
+correctness = "warn"
+cargo = "warn"
+restriction = "warn"
+blanket_clippy_restriction_lints = { level = "allow", priority = 1 }
+mod_module_files = { level = "allow", priority = 1 }
+missing_docs_in_private_items = { level = "allow", priority = 1 }
+missing_inline_in_public_items = { level = "allow", priority = 1 }
+implicit_return = { level = "allow", priority = 1 }
+question_mark_used = { level = "allow", priority = 1 }
+separated_literal_suffix = { level = "allow", priority = 1 }
+std_instead_of_alloc = { level = "allow", priority = 1 }
+std_instead_of_core = { level = "allow", priority = 1 }
+missing_trait_methods = { level = "allow", priority = 1 }
+shadow_reuse = { level = "allow", priority = 1 }
+pub_with_shorthand = { level = "allow", priority = 1 }
+single_call_fn = { level = "allow", priority = 1 }
+error_impl_error = { level = "allow", priority = 1 }
+self_named_module_files = { level = "allow", priority = 1 }
+tests_outside_test_module = { level = "allow", priority = 1 }
+module_name_repetitions = { level = "allow", priority = 1 }
+pub_use = { level = "allow", priority = 1 }
+pattern_type_mismatch = { level = "allow", priority = 1 }
+multiple_crate_versions = { level = "allow", priority = 1 }
