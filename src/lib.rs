@@ -3,9 +3,9 @@
 //! ### Usage:
 //! The usage is a bit different than the node version. See the examples for more details and a working example.
 //! ```rust
+//! use bson::doc;
 //! use mongodb::{options::FindOptions, Client};
 //! use mongodb_cursor_pagination::{FindResult, Pagination};
-//! use bson::doc;
 //! use serde::Deserialize;
 //!
 //! // Note that your data structure must derive Deserialize
@@ -51,9 +51,9 @@
 //!
 //!     // query page 1, 2 at a time
 //!     let options = FindOptions::builder()
-//!             .limit(2)
-//!             .sort(doc! { "name": 1 })
-//!             .build();
+//!         .limit(2)
+//!         .sort(doc! { "name": 1 })
+//!         .build();
 //!
 //!     let mut find_results: FindResult<MyFruit> = fruits
 //!         .find_paginated(None, Some(options.clone()), None)
@@ -86,7 +86,7 @@
 //!     pub has_next_page: bool,
 //!     pub has_previous_page: bool,
 //!     pub start_cursor: Option<String>,
-//!     pub next_cursor: Option<String>,
+//!     pub end_cursor: Option<String>,
 //! }
 //!
 //! pub struct Edge {

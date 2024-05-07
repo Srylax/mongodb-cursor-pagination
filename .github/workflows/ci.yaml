@@ -33,6 +33,11 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo
+        ports:
+          - 27017:27017
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -46,9 +51,36 @@ jobs:
         run: cargo test --no-run
       - name: Test
         run: cargo hack test --feature-powerset
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo
+        ports:
+          - 27017:27017
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run example default
+        run: cargo run --example default --verbose
+      - name: Run example multisort
+        run: cargo run --example multisort --verbose
+      - name: Run example regex
+        run: cargo run --example regex --verbose
   msrv:
     name: "Check MSRV"
     runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo
+        ports:
+          - 27017:27017
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

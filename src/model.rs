@@ -88,6 +88,7 @@ impl<'de> Deserialize<'de> for Edge {
 
 #[cfg(feature = "graphql")]
 #[juniper::graphql_object]
+#[allow(clippy::multiple_inherent_impl)]
 impl Edge {
     fn cursor(&self) -> String {
         self.0.to_string()
