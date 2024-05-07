@@ -1,6 +1,8 @@
 [package]
 name = "mongodb-cursor-pagination"
 version = "1.0.0-rc.1"
+rust-version = "1.78.0"
+
 authors = ["Kylian Lichtensteiger <e38c1a93@srylax.dev"]
 edition = "2021"
 license = "MIT"

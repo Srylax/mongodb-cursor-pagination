@@ -1,0 +1,36 @@
+name: Security audit
+
+permissions:
+  contents: read
+  issues: write # to create issues (actions-rs/audit-check)
+  checks: write # to create check (actions-rs/audit-check)
+
+on:
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+  push:
+    branches:
+      - main
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+  CLICOLOR: 1
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  security_audit:
+    runs-on: ubuntu-latest
+    # Prevent sudden announcement of a new advisory from failing ci:
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - uses: actions-rs/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
