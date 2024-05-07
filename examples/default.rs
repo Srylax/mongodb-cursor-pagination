@@ -1,3 +1,5 @@
+#![allow(clippy::pedantic, clippy::restriction, clippy::cargo, missing_docs)]
+
 use crate::helper::{create_options, print_details, MyFruit};
 use bson::doc;
 use mongodb::Client;

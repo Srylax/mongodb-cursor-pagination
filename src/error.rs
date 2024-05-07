@@ -1,3 +1,4 @@
+#![allow(clippy::absolute_paths)]
 use thiserror::Error;
 
 /// Possible errors that can arise during parsing and creating a cursor.

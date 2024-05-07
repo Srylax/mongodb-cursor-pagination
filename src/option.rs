@@ -13,12 +13,12 @@ pub struct CursorOptions {
 }
 
 impl CursorOptions {
-    pub fn new(options: impl Into<FindOptions>, cursor: Option<DirectedCursor>) -> Self {
+    pub fn new<T: Into<FindOptions>>(options: T, cursor: Option<DirectedCursor>) -> Self {
         let mut options = options.into();
 
         let mut sort = options.sort.unwrap_or_default();
         if !sort.contains_key("_id") {
-            sort.insert("_id", -1);
+            sort.insert("_id", -1_i32);
         }
         options.sort = Some(sort);
         Self {
@@ -34,16 +34,16 @@ impl CursorOptions {
     }
 
     fn get_directed(mut options: FindOptions, cursor: Option<&DirectedCursor>) -> FindOptions {
-        if !matches!(cursor, Some(DirectedCursor::Backwards(_))) {
+        if !matches!(cursor, Some(&DirectedCursor::Backwards(_))) {
             return options;
         }
 
         if let Some(sort) = options.sort.as_mut() {
             sort.iter_mut().for_each(|(_key, value)| {
-                if let Bson::Int32(num) = value {
+                if let &mut Bson::Int32(num) = value {
                     *value = Bson::Int32(num.neg());
                 }
-                if let Bson::Int64(num) = value {
+                if let &mut Bson::Int64(num) = value {
                     *value = Bson::Int64(num.neg());
                 }
             });
