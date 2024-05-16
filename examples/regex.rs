@@ -1,10 +1,13 @@
 #![allow(clippy::pedantic, clippy::restriction, clippy::cargo, missing_docs)]
 
-use crate::helper::{create_options, print_details, MyFruit};
-use bson::doc;
 use bson::{Bson, Regex};
+use bson::doc;
+use futures_util::{StreamExt, TryStreamExt};
 use mongodb::Client;
-use mongodb_cursor_pagination::{FindResult, Pagination};
+
+use mongodb_cursor_pagination::{FindResult, paginate, Pagination};
+
+use crate::helper::{create_options, MyFruit, print_details};
 
 mod helper;
 
@@ -66,7 +69,7 @@ async fn main() {
     options = create_options(2, 0, doc! { "name": 1 });
     let mut cursor = find_results.page_info.end_cursor;
     find_results = fruits
-        .find_paginated(Some(filter.clone()), Some(options), cursor)
+        .find_paginated(Some(filter.clone()), Some(options), cursor.as_ref())
         .await
         .expect("Unable to find data");
     assert_eq!(
@@ -82,7 +85,7 @@ async fn main() {
     options = create_options(2, 0, doc! { "name": 1 });
     cursor = find_results.page_info.start_cursor;
     find_results = fruits
-        .find_paginated(Some(filter.clone()), Some(options), cursor)
+        .find_paginated(Some(filter.clone()), Some(options), cursor.as_ref())
         .await
         .expect("Unable to find data");
     assert_eq!(
@@ -95,7 +98,7 @@ async fn main() {
     options = create_options(2, 0, doc! { "name": 1 });
     cursor = find_results.page_info.end_cursor;
     find_results = fruits
-        .find_paginated(Some(filter.clone()), Some(options), cursor)
+        .find_paginated(Some(filter.clone()), Some(options), cursor.as_ref())
         .await
         .expect("Unable to find data");
     assert_eq!(
@@ -111,7 +114,7 @@ async fn main() {
     options = create_options(2, 0, doc! { "name": 1 });
     cursor = find_results.page_info.end_cursor;
     find_results = fruits
-        .find_paginated(Some(filter.clone()), Some(options), cursor)
+        .find_paginated(Some(filter.clone()), Some(options), cursor.as_ref())
         .await
         .expect("Unable to find data");
     assert_eq!(
@@ -124,9 +127,19 @@ async fn main() {
     options = create_options(2, 0, doc! { "name": 1 });
     cursor = find_results.page_info.start_cursor;
     find_results = fruits
-        .find_paginated(Some(filter.clone()), Some(options), cursor)
+        .find_paginated(Some(filter.clone()), Some(options.clone()), cursor.as_ref())
         .await
         .expect("Unable to find data");
+    let (filter, options) =
+        paginate(Some(filter.clone()), Some(options), cursor.as_ref()).expect("Unable to paginate");
+    let items = fruits
+        .find(filter, options)
+        .await
+        .expect("Unable to find data")
+        .try_collect::<Vec<_>>()
+        .await
+        .expect("Unable to collect data");
+    assert_eq!(items, find_results.items);
     assert_eq!(
         find_results.items,
         vec![

@@ -68,7 +68,7 @@
 //!     // get the second page
 //!     let mut cursor = find_results.page_info.end_cursor;
 //!     find_results = fruits
-//!         .find_paginated(None, Some(options), cursor)
+//!         .find_paginated(None, Some(options), cursor.as_ref())
 //!         .await
 //!         .expect("Unable to find data");
 //!   #  assert_eq!(
@@ -127,21 +127,40 @@
 //! }
 //! ```
 
+use async_trait::async_trait;
+use bson::{Bson, doc, Document};
+use futures_util::stream::StreamExt;
+use futures_util::TryStreamExt;
+use mongodb::{Collection, options::FindOptions};
+use serde::de::DeserializeOwned;
+
+use error::CursorError;
+pub use model::*;
+
+use crate::option::PaginationOptions;
+
+mod count;
 mod error;
 mod model;
 mod option;
-pub use model::*;
 
-use crate::option::CursorOptions;
-use bson::{doc, Bson, Document};
-use error::CursorError;
-use futures_util::stream::StreamExt;
-use futures_util::TryStreamExt;
-use mongodb::options::CountOptions;
-use mongodb::{options::FindOptions, Collection};
-use serde::de::DeserializeOwned;
+pub fn paginate(
+    filter: Option<Document>,
+    options: Option<FindOptions>,
+    cursor: Option<&DirectedCursor>,
+) -> Result<(Document, FindOptions), CursorError> {
+    let mut options = options.unwrap_or_default();
+    options.ensure_sort();
 
-use async_trait::async_trait;
+    if matches!(cursor, Some(DirectedCursor::Backwards(_))) {
+        options.reverse();
+    }
+
+    Ok((
+        get_filter(filter.unwrap_or_default(), &options, cursor)?,
+        options,
+    ))
+}
 
 #[async_trait]
 /// Used to paginate through a collection.
@@ -156,7 +175,7 @@ pub trait Pagination {
         &self,
         filter: Option<Document>,
         options: Option<FindOptions>,
-        cursor: Option<DirectedCursor>,
+        cursor: Option<&DirectedCursor>,
     ) -> Result<FindResult<T>, CursorError>
     where
         T: DeserializeOwned + Send;
@@ -168,20 +187,16 @@ impl<I: Send + Sync> Pagination for Collection<I> {
         &self,
         filter: Option<Document>,
         options: Option<FindOptions>,
-        cursor: Option<DirectedCursor>,
+        cursor: Option<&DirectedCursor>,
     ) -> Result<FindResult<T>, CursorError>
     where
         T: DeserializeOwned + Send,
     {
-        let options = CursorOptions::new(options.unwrap_or_default(), cursor.clone());
-
-        let filter = filter.unwrap_or_default();
-
-        let query = get_query(filter.clone(), &options, cursor.as_ref())?;
+        let (filter, options) = paginate(filter, options, cursor)?;
 
         let mut documents = self
             .clone_with_type::<Document>()
-            .find(query.clone(), Some(options.clone().into()))
+            .find(filter.clone(), Some(options.clone().into()))
             .await?
             .try_collect::<Vec<Document>>()
             .await?;
@@ -205,7 +220,8 @@ impl<I: Send + Sync> Pagination for Collection<I> {
         let end_cursor = edges.last().cloned().map(DirectedCursor::Forward);
         let start_cursor = edges.first().cloned().map(DirectedCursor::Backwards);
 
-        let has_next_page = has_page(
+        #[cfg(feature = "count")]
+        let has_next_page = count::has_page(
             &self.clone_with_type(),
             filter.clone(),
             options.clone(),
@@ -213,7 +229,8 @@ impl<I: Send + Sync> Pagination for Collection<I> {
         )
         .await?;
 
-        let has_previous_page = has_page(
+        #[cfg(feature = "count")]
+        let has_previous_page = count::has_page(
             &self.clone_with_type(),
             filter.clone(),
             options.clone(),
@@ -222,7 +239,9 @@ impl<I: Send + Sync> Pagination for Collection<I> {
         .await?;
 
         let page_info = PageInfo {
+            #[cfg(feature = "count")]
             has_previous_page,
+            #[cfg(feature = "count")]
             has_next_page,
             start_cursor,
             end_cursor,
@@ -231,23 +250,11 @@ impl<I: Send + Sync> Pagination for Collection<I> {
         Ok(FindResult {
             page_info,
             edges,
-            total_count: count_documents(options.clone().into(), self, Some(&filter)).await?,
+            #[cfg(feature = "count")]
+            total_count: count::count_documents(options.clone(), self, Some(&filter)).await?,
             items,
         })
     }
-}
-
-async fn count_documents<T: Sync>(
-    mut options: CountOptions,
-    collection: &Collection<T>,
-    filter: Option<&Document>,
-) -> Result<u64, CursorError> {
-    options.limit = None;
-    options.skip = None;
-    let count_query = filter.map_or_else(Document::new, Clone::clone);
-    Ok(collection
-        .count_documents(count_query, Some(options))
-        .await?)
 }
 
 /*
@@ -259,9 +266,9 @@ $or: [{
 _id: { $lt: nextId }
 }]
 */
-fn get_query(
+fn get_filter(
     mut filter: Document,
-    options: &CursorOptions,
+    options: &FindOptions,
     cursor: Option<&DirectedCursor>,
 ) -> Result<Document, CursorError> {
     let Some(cursor) = cursor else {
@@ -316,27 +323,4 @@ fn get_query(
         queries.pop().unwrap_or_default()
     };
     Ok(filter)
-}
-
-async fn has_page(
-    collection: &Collection<Document>,
-    filter: Document,
-    mut options: CursorOptions,
-    cursor: Option<&DirectedCursor>,
-) -> Result<bool, CursorError> {
-    let Some(cursor) = cursor else {
-        return Ok(false);
-    };
-
-    options.set_cursor(cursor.clone());
-    options.skip = None;
-    let filter = get_query(filter, &options, Some(cursor))?;
-
-    Ok(collection
-        .find(Some(filter), Some(options.into()))
-        .await?
-        .next()
-        .await
-        .transpose()?
-        .is_some())
 }

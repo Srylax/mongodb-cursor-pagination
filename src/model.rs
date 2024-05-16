@@ -1,14 +1,15 @@
-use std::fmt;
 use std::{
     fmt::Display,
     ops::{Deref, DerefMut},
 };
+use std::fmt;
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bson::Document;
+use mongodb::options::FindOptions;
+use serde::{Deserialize, ser, Serialize};
 use serde::de::{self, Visitor};
-use serde::{ser, Deserialize, Serialize};
 
 use crate::option::CursorOptions;
 
@@ -26,7 +27,7 @@ impl Edge {
     /// * `document`: The Item to which the Edge will point to
     /// * `options`: Used to extract the sorting keys
     #[must_use]
-    pub fn new(document: &Document, options: &CursorOptions) -> Self {
+    pub fn new(document: &Document, options: &FindOptions) -> Self {
         let mut cursor = Document::new();
         options
             .sort
@@ -119,8 +120,10 @@ impl DerefMut for Edge {
 #[non_exhaustive]
 pub struct PageInfo {
     /// True if there is a previous page which contains items
+    #[cfg(feature = "count")]
     pub has_previous_page: bool,
     /// True if there is a next page which contains items
+    #[cfg(feature = "count")]
     pub has_next_page: bool,
     /// Cursor to the first item of the page. Is set even when there is no previous page.
     pub start_cursor: Option<DirectedCursor>,
@@ -131,10 +134,11 @@ pub struct PageInfo {
 #[cfg(feature = "graphql")]
 #[juniper::graphql_object]
 impl PageInfo {
+    #[cfg(feature = "count")]
     fn has_next_page(&self) -> bool {
         self.has_next_page
     }
-
+    #[cfg(feature = "count")]
     fn has_previous_page(&self) -> bool {
         self.has_previous_page
     }
@@ -157,6 +161,7 @@ pub struct FindResult<T> {
     /// Edges to all items in the current Page, including start & end-cursor
     pub edges: Vec<Edge>,
     /// Total count of items in the whole collection
+    #[cfg(feature = "count")]
     pub total_count: u64,
     /// All items in the current Page
     pub items: Vec<T>,

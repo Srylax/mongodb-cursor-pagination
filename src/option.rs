@@ -1,7 +1,8 @@
-use bson::Bson;
+use std::ops::{Deref, DerefMut, Neg};
+
+use bson::{Bson, doc};
 use mongodb::options::{CountOptions, EstimatedDocumentCountOptions, FindOptions};
 use serde::{Deserialize, Serialize};
-use std::ops::{Deref, DerefMut, Neg};
 
 use crate::DirectedCursor;
 
@@ -34,7 +35,7 @@ impl CursorOptions {
     }
 
     fn get_directed(mut options: FindOptions, cursor: Option<&DirectedCursor>) -> FindOptions {
-        if !matches!(cursor, Some(&DirectedCursor::Backwards(_))) {
+        if matches!(cursor, Some(&DirectedCursor::Forward(_))) {
             return options;
         }
 
@@ -49,6 +50,40 @@ impl CursorOptions {
             });
         }
         options
+    }
+}
+
+pub(crate) trait PaginationOptions {
+    fn reverse(&mut self);
+    fn ensure_sort(&mut self);
+}
+
+impl PaginationOptions for FindOptions {
+    fn reverse(&mut self) {
+        let Some(sort) = &mut self.sort else {
+            return;
+        };
+        for (_key, value) in sort.iter_mut() {
+            if let &mut Bson::Int32(num) = value {
+                *value = Bson::Int32(num.neg());
+            }
+            if let &mut Bson::Int64(num) = value {
+                *value = Bson::Int64(num.neg());
+            }
+        }
+    }
+
+    fn ensure_sort(&mut self) {
+        match &mut self.sort {
+            None => {
+                self.sort = Some(doc! { "_id": -1_i32 });
+            }
+            Some(sort) => {
+                if !sort.contains_key("_id") {
+                    sort.insert("_id", -1_i32);
+                }
+            }
+        }
     }
 }
 
