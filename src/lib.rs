@@ -1,22 +1,22 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 #![warn(
-    clippy::cast_lossless,
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss,
-    clippy::checked_conversions,
-    clippy::implicit_saturating_sub,
-    clippy::integer_arithmetic,
-    clippy::mod_module_files,
-    clippy::panic,
-    clippy::panic_in_result_fn,
-    clippy::unwrap_used,
-    missing_docs,
-    rust_2018_idioms,
-    unused_lifetimes,
-    unused_qualifications
+clippy::cast_lossless,
+clippy::cast_possible_truncation,
+clippy::cast_possible_wrap,
+clippy::cast_precision_loss,
+clippy::cast_sign_loss,
+clippy::checked_conversions,
+clippy::implicit_saturating_sub,
+clippy::integer_arithmetic,
+clippy::mod_module_files,
+clippy::panic,
+clippy::panic_in_result_fn,
+clippy::unwrap_used,
+missing_docs,
+rust_2018_idioms,
+unused_lifetimes,
+unused_qualifications
 )]
 
 //! ### Usage:
@@ -160,6 +160,7 @@ use mongodb::{options::FindOptions, Collection};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::ops::Neg;
+use futures_util::TryFutureExt;
 
 /// Provides details about if there are more pages and the cursor to the start of the list and end
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
@@ -272,8 +273,8 @@ impl PaginatedCursor {
             .estimated_document_count(Some(EstimatedDocumentCountOptions::from(
                 self.options.clone(),
             )))
-            .await
-            .unwrap();
+            .map_err(|err| CursorError::Unknown(err.to_string()))
+            .await?;
         Ok(total_count)
     }
 
@@ -292,7 +293,7 @@ impl PaginatedCursor {
         let total_count = collection
             .count_documents(count_query, Some(CountOptions::from(count_options)))
             .await
-            .unwrap();
+            .map_err(|err| CursorError::Unknown(err.to_string()))?;
         Ok(total_count)
     }
 
@@ -302,11 +303,11 @@ impl PaginatedCursor {
         collection: &Collection<Document>,
         filter: Option<&Document>,
     ) -> Result<FindResult<T>, CursorError>
-    where
-        T: DeserializeOwned + Sync + Send + Unpin + Clone,
+        where
+            T: DeserializeOwned + Sync + Send + Unpin + Clone,
     {
         // first count the docs
-        let total_count = self.count_documents(collection, filter).await.unwrap();
+        let total_count = self.count_documents(collection, filter).await?;
 
         // setup defaults
         let mut items: Vec<T> = vec![];
@@ -328,7 +329,7 @@ impl PaginatedCursor {
         }
 
         // build the cursor
-        let query_doc = self.get_query(filter.cloned());
+        let query_doc = self.get_query(filter.cloned())?;
         let mut options = self.options.clone();
         let skip_value = options.skip.unwrap_or(0);
         if self.has_cursor || skip_value == 0 {
@@ -354,13 +355,14 @@ impl PaginatedCursor {
         let mut cursor = collection
             .find(query_doc, Some(options.into()))
             .await
-            .unwrap();
+            .map_err(|err| CursorError::Unknown(err.to_string()))?;
         while let Some(result) = cursor.next().await {
             match result {
                 Ok(doc) => {
-                    let item = bson::from_bson(Bson::Document(doc.clone())).unwrap();
+                    let item = bson::from_bson(Bson::Document(doc.clone()))
+                        .map_err(|error| CursorError::Unknown(error.to_string()))?;
                     edges.push(Edge {
-                        cursor: self.create_from_doc(&doc),
+                        cursor: self.create_from_doc(&doc)?,
                     });
                     items.push(item);
                 }
@@ -375,7 +377,11 @@ impl PaginatedCursor {
             has_previous_page = true;
             has_next_page = has_more;
         } else {
-            has_more = items.len() as i64 > self.options.limit.unwrap().saturating_sub(1);
+            has_more = match self.options.limit{
+                None => return Err(CursorError::Unknown("Limit is empty".into())),
+                Some(limit) => items.len() as i64  > limit.saturating_sub(1)
+            };
+
             has_previous_page = (self.has_cursor && self.direction == CursorDirections::Next)
                 || (is_previous_query && has_more);
             has_next_page = (self.direction == CursorDirections::Next && has_more)
@@ -427,18 +433,23 @@ impl PaginatedCursor {
         }
     }
 
-    fn create_from_doc(&self, doc: &Document) -> String {
+    fn create_from_doc(&self, doc: &Document) -> Result<String, CursorError> {
         let mut only_sort_keys = Document::new();
-        self.options.sort.as_ref().map_or_else(String::new, |sort| {
-            for key in sort.keys() {
-                if let Some((_, value)) = self.get_value_from_doc(key, Bson::Document(doc.clone()))
-                {
-                    only_sort_keys.insert(key, value);
+
+        match self.options.sort.as_ref() {
+            None =>  Ok(String::new()),
+            Some(sort) => {
+                for key in sort.keys() {
+                    if let Some((_, value)) = self.get_value_from_doc(key, Bson::Document(doc.clone()))
+                    {
+                        only_sort_keys.insert(key, value);
+                    }
                 }
+                let buf = bson::to_vec(&only_sort_keys)
+                    .map_err(|err| CursorError::Unknown(err.to_string()))?;
+                Ok(STANDARD.encode(buf))
             }
-            let buf = bson::to_vec(&only_sort_keys).unwrap();
-            STANDARD.encode(buf)
-        })
+        }
     }
 
     /*
@@ -450,24 +461,28 @@ impl PaginatedCursor {
     _id: { $lt: nextId }
     }]
     */
-    fn get_query(&self, query: Option<Document>) -> Document {
+    fn get_query(&self, query: Option<Document>) -> Result<Document, CursorError> {
         // now create the filter
         let mut query_doc = query.unwrap_or_default();
 
         // Don't do anything if no cursor is provided
         if self.cursor_doc.is_empty() {
-            return query_doc;
+            return Ok(query_doc)
         }
         let Some(sort) = &self.options.sort else {
-            return query_doc;
+            return Ok(query_doc)
         };
 
         // this is the simplest form, it's just a sort by _id
         if sort.len() <= 1 {
-            let object_id = self.cursor_doc.get("_id").unwrap().clone();
+            let object_id = match self.cursor_doc.get("_id"){
+                None => return Err(CursorError::Unknown("_id is value is missing from cursor_doc".into())),
+                Some(value) => value.clone()
+            };
+
             let direction = self.get_direction_from_key(sort, "_id");
             query_doc.insert("_id", doc! { direction: object_id });
-            return query_doc;
+            return Ok(query_doc)
         }
 
         let mut queries: Vec<Document> = Vec::new();
@@ -491,7 +506,7 @@ impl PaginatedCursor {
         } else {
             queries.pop().unwrap_or_default()
         };
-        query_doc
+        Ok(query_doc)
     }
 
     fn get_direction_from_key(&self, sort: &Document, key: &str) -> &'static str {
@@ -519,7 +534,8 @@ fn map_from_base64(base64_string: String) -> Result<Document, CursorError> {
     // change from base64
     let decoded = STANDARD.decode(base64_string)?;
     // decode from bson
-    let cursor_doc = bson::from_slice(decoded.as_slice()).unwrap();
+    let cursor_doc = bson::from_slice(decoded.as_slice())
+        .map_err(|err| CursorError::Unknown(err.to_string()))?;
     Ok(cursor_doc)
 }
 

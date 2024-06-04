@@ -1,6 +1,6 @@
 [package]
 name = "mongodb-cursor-pagination"
-version = "0.3.2"
+version = "0.3.3"
 authors = ["Kylian Lichtensteiger <e38c1a93@srylax.dev"]
 edition = "2021"
 license = "MIT"
@@ -16,12 +16,12 @@ default = []
 graphql = ["juniper"]
 
 [dependencies]
-base64 = "0.21.0"
+base64 = "0.22.1"
 bson = "2.5.0"
 log = "0.4.17"
 mongodb = "2.3.1"
 serde = "1.0"
-juniper = { version = "0.15.11", optional = true }
+juniper = { version = "0.16.1", optional = true }
 futures = "0.3.26"
 futures-util = "0.3.26"
 
